@@ -8,7 +8,11 @@ export interface Connector {
   label: string;
   /** Hosted MCP endpoint URL (from env). */
   url: string;
-  /** Bearer/OAuth token for the endpoint (from env). */
+  /**
+   * Optional bearer token for the endpoint (from env). Some hosted MCP servers
+   * (e.g. Zapier) embed auth in the URL itself, so no separate token is needed —
+   * a connector is enabled as long as it has a URL.
+   */
   token: string;
 }
 
@@ -30,13 +34,14 @@ const SPECS: ConnectorSpec[] = [
   { name: "zapier", label: "Zapier (Gmail, Telegram)", urlEnv: "ZAPIER_MCP_URL", tokenEnv: "ZAPIER_MCP_TOKEN", shareTargets: ["gmail", "telegram"] },
 ];
 
-/** Connectors that have both a URL and token configured. */
+/** Connectors that have a URL configured (token is optional). */
 export function enabledConnectors(): Connector[] {
   const out: Connector[] = [];
   for (const spec of SPECS) {
     const url = process.env[spec.urlEnv];
-    const token = process.env[spec.tokenEnv];
-    if (url && token) out.push({ name: spec.name, label: spec.label, url, token });
+    if (url) {
+      out.push({ name: spec.name, label: spec.label, url, token: process.env[spec.tokenEnv] ?? "" });
+    }
   }
   return out;
 }
@@ -46,8 +51,8 @@ export function connectorForTarget(target: ShareTarget): Connector | null {
   const spec = SPECS.find((s) => s.shareTargets.includes(target));
   if (!spec) return null;
   const url = process.env[spec.urlEnv];
-  const token = process.env[spec.tokenEnv];
-  return url && token ? { name: spec.name, label: spec.label, url, token } : null;
+  if (!url) return null;
+  return { name: spec.name, label: spec.label, url, token: process.env[spec.tokenEnv] ?? "" };
 }
 
 /**
@@ -60,7 +65,9 @@ export function mcpRequestFragments(connectors: Connector[]) {
       type: "url" as const,
       name: c.name,
       url: c.url,
-      authorization_token: c.token,
+      // Only include a token when one is configured; URL-embedded-auth servers
+      // (e.g. Zapier) don't have a separate token.
+      ...(c.token ? { authorization_token: c.token } : {}),
     })),
     tools: connectors.map((c) => ({ type: "mcp_toolset" as const, mcp_server_name: c.name })),
   };

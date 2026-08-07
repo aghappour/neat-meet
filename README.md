@@ -61,16 +61,20 @@ Whisper sidecar automatically.
 
 See `.env.example`. Highlights:
 
-- `ANTHROPIC_API_KEY` — required, for summary + insights.
+- **Anthropic credentials** (for summary + insights) — either set `ANTHROPIC_API_KEY`,
+  or manage no raw key and run `ant auth login` (the Anthropic CLI); the app resolves
+  the OAuth profile automatically. If it isn't picked up, run
+  `eval "$(ant auth print-credentials --env)"` before starting.
 - `WHISPER_PROFILE=capable|modest` — model size / latency; also switchable in the
   UI. `capable` (large-v3, ~1s chunks) for Apple Silicon / GPU; `modest`
   (base, longer chunks) for lower-powered machines.
 - `TRANSCRIPTION_PROVIDER=whisper|deepgram` — swap in Deepgram (needs
   `DEEPGRAM_API_KEY`) for lowest latency + speaker labels.
 - `{NOTION,SLACK,GDRIVE,ZAPIER}_MCP_URL` / `_MCP_TOKEN` — hosted MCP endpoints
-  for grounding + sharing. Each is optional and skipped gracefully if unset.
-  **Zapier** is the fan-out for **Gmail and Telegram** — enable those Zapier
-  actions and no separate OAuth is needed.
+  for grounding + sharing. A connector turns on as soon as its `_MCP_URL` is set;
+  the `_MCP_TOKEN` is optional (URL-embedded-auth servers like Zapier need no token).
+  **Zapier** is the fan-out for **Gmail and Telegram** — generate a URL at
+  <https://mcp.zapier.com>, enable those actions, and leave `ZAPIER_MCP_TOKEN` blank.
 
 ### Connections
 

@@ -2,13 +2,26 @@ import Anthropic from "@anthropic-ai/sdk";
 
 let client: Anthropic | null = null;
 
-/** Lazily construct the Anthropic client (reads ANTHROPIC_API_KEY from env). */
+/**
+ * Lazily construct the Anthropic client. Credentials are resolved by the SDK in
+ * order: ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → an `ant auth login` OAuth
+ * profile. So you can either set a key in .env, or run `ant auth login` (the
+ * Anthropic CLI) and manage no raw key at all.
+ */
 export function getClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is not set");
+  if (client) return client;
+  try {
+    // Zero-arg constructor performs the full credential resolution above.
+    client = new Anthropic();
+    return client;
+  } catch {
+    throw new Error(
+      "No Anthropic credentials found. Either set ANTHROPIC_API_KEY in .env, or run " +
+        "`ant auth login` (Anthropic CLI) so credentials resolve automatically. If you used " +
+        '`ant auth login` and still see this, run `eval "$(ant auth print-credentials --env)"` ' +
+        "in the shell before starting the app.",
+    );
   }
-  if (!client) client = new Anthropic();
-  return client;
 }
 
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5";
