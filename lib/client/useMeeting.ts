@@ -38,7 +38,9 @@ export function useMeeting() {
     summarizing: false,
     insights: [],
     insightsLoading: false,
-    profile: "capable",
+    // Default to the profile that keeps up on a CPU-only machine — `capable`
+    // needs a CUDA GPU to hit its latency target.
+    profile: "modest",
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -84,7 +86,17 @@ export function useMeeting() {
 
   const start = useCallback(async () => {
     if (state.status === "live" || state.status === "connecting") return;
-    patch({ status: "connecting", error: null });
+    // Each start mints a new sessionId, and the server numbers segments from 1
+    // per session — so carrying the previous meeting's state over would collide
+    // on segment id and blend two transcripts into one pane.
+    patch({
+      status: "connecting",
+      error: null,
+      segments: [],
+      interims: {},
+      summary: null,
+      insights: [],
+    });
 
     try {
       // 1. Capture mic + meeting-tab audio.

@@ -78,8 +78,14 @@ PROFILES: dict[str, Profile] = {
 }
 
 
-def pick_device_and_compute(requested_compute: str) -> tuple[str, str]:
-    """Prefer CUDA when available; otherwise CPU with an int8 compute type."""
+def detect_device(requested_compute: str) -> tuple[str, str]:
+    """
+    Resolve the execution device for CTranslate2.
+
+    CTranslate2 accelerates on CUDA only — there is no Metal/MPS backend — so an
+    Apple Silicon machine lands on CPU however fast it feels. `resolve_profile`
+    relies on that distinction to size the model to what the device can sustain.
+    """
     try:
         import ctranslate2  # faster-whisper's backend
 
@@ -92,12 +98,42 @@ def pick_device_and_compute(requested_compute: str) -> tuple[str, str]:
     return "cpu", compute
 
 
+# `capable` assumes a CUDA GPU. Without one, large-v3 transcribes many times
+# slower than real time: the buffer grows faster than it drains, interims arrive
+# tens of seconds late, and a pause never gets processed so nothing finalizes —
+# the transcript pane simply stays empty. Drop to a model the CPU can keep up
+# with instead of pretending.
+CPU_FALLBACK = Profile(
+    model="small",
+    compute_type="int8",
+    step_s=1.5,
+    max_segment_s=10.0,
+    silence_s=0.6,
+    rms_threshold=0.008,
+)
+
+
+def resolve_profile(name: str) -> Profile:
+    """Look up a profile, downgrading GPU-sized models when there's no GPU."""
+    profile = PROFILES.get(name, PROFILES["modest"])
+    if profile.model.startswith("large"):
+        device, _ = detect_device(profile.compute_type)
+        if device != "cuda":
+            print(
+                f"[whisper] no CUDA device — '{name}' downgraded from {profile.model} "
+                f"to {CPU_FALLBACK.model} so transcription keeps up with live audio",
+                flush=True,
+            )
+            return CPU_FALLBACK
+    return profile
+
+
 # Models are expensive to load; cache one per (model, device, compute).
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
 
 
 def get_model(profile: Profile) -> WhisperModel:
-    device, compute = pick_device_and_compute(profile.compute_type)
+    device, compute = detect_device(profile.compute_type)
     key = (profile.model, device, compute)
     if key not in _model_cache:
         print(f"[whisper] loading {profile.model} on {device} ({compute})", flush=True)
@@ -191,7 +227,7 @@ async def handle(ws: websockets.WebSocketServerProtocol) -> None:
                 except json.JSONDecodeError:
                     continue
                 if msg.get("type") == "config":
-                    profile = PROFILES.get(msg.get("profile", ""), PROFILES["capable"])
+                    profile = resolve_profile(msg.get("profile", ""))
                     model = await loop.run_in_executor(None, get_model, profile)
                     session = StreamSession(profile, model)
                     await ws.send(json.dumps({"type": "ready"}))
@@ -227,7 +263,7 @@ async def handle(ws: websockets.WebSocketServerProtocol) -> None:
 async def main() -> None:
     port = int(os.environ.get("WHISPER_SIDECAR_PORT", "8765"))
     # Warm the default model so the first meeting doesn't pay load latency mid-call.
-    default_profile = PROFILES.get(os.environ.get("WHISPER_PROFILE", "capable"), PROFILES["capable"])
+    default_profile = resolve_profile(os.environ.get("WHISPER_PROFILE", "modest"))
     await asyncio.get_running_loop().run_in_executor(None, get_model, default_profile)
     print(f"[whisper] sidecar listening on ws://127.0.0.1:{port}", flush=True)
     async with websockets.serve(handle, "127.0.0.1", port, max_size=None):

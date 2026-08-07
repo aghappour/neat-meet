@@ -9,6 +9,8 @@
 import { createServer } from "node:http";
 import { parse } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import next from "next";
 import { WebSocketServer, WebSocket } from "ws";
 import { createProvider, type TranscriptionProvider } from "./lib/transcription/provider";
@@ -26,10 +28,24 @@ const handle = app.getRequestHandler();
 
 let sidecar: ChildProcess | null = null;
 
+/**
+ * Interpreter for the sidecar. The README has you install the dependencies into
+ * `whisper-sidecar/.venv`, so prefer that over whatever bare `python3` happens
+ * to be on PATH — a pyenv/conda shim without faster-whisper would otherwise die
+ * on the import guard the moment the server starts.
+ */
+function sidecarPython(): string {
+  if (process.env.WHISPER_PYTHON) return process.env.WHISPER_PYTHON;
+  const venv = join(process.cwd(), "whisper-sidecar", ".venv", "bin", "python3");
+  return existsSync(venv) ? venv : "python3";
+}
+
 /** Spawn the local Whisper sidecar (only when using the whisper provider). */
 function startSidecar(): void {
   if (providerKind !== "whisper" || sidecar) return;
-  sidecar = spawn("python3", ["whisper-sidecar/main.py"], {
+  const python = sidecarPython();
+  console.log(`[sidecar] starting with ${python}`);
+  sidecar = spawn(python, ["whisper-sidecar/main.py"], {
     stdio: "inherit",
     env: { ...process.env, WHISPER_SIDECAR_PORT: sidecarPort },
   });
@@ -50,13 +66,18 @@ app.prepare().then(() => {
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  // Next owns its own upgrades in development (the HMR / dev-overlay socket).
+  // Destroying those breaks hot reload and suppresses the error overlay, so
+  // anything that isn't our audio socket gets handed back to Next.
+  const upgradeHandler = app.getUpgradeHandler();
 
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url ?? "");
     if (pathname === "/api/audio") {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
     } else {
-      socket.destroy();
+      // Don't let a rejected upgrade become an unhandled rejection.
+      Promise.resolve(upgradeHandler(req, socket, head)).catch(() => socket.destroy());
     }
   });
 
@@ -91,7 +112,7 @@ app.prepare().then(() => {
         sessionId = msg.sessionId;
         try {
           provider = await createProvider(providerKind, {
-            profile: (msg.profile ?? "capable") as WhisperProfile,
+            profile: (msg.profile ?? "modest") as WhisperProfile,
             sidecarUrl,
             deepgramApiKey: process.env.DEEPGRAM_API_KEY,
           });

@@ -50,8 +50,8 @@ export default function Page() {
               disabled={!notStarted}
               className="rounded-md border border-edge bg-ink px-2 py-1 text-xs text-slate-200 disabled:opacity-40"
             >
-              <option value="capable">Capable machine</option>
-              <option value="modest">Modest machine</option>
+              <option value="modest">Modest — CPU</option>
+              <option value="capable">Capable — CUDA GPU</option>
             </select>
           </label>
 
