@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectorForTarget, enabledConnectors, mcpRequestFragments } from "@/lib/connectors";
+import {
+  connectorForTarget,
+  deliverableTargets,
+  enabledConnectors,
+  mcpRequestFragments,
+} from "@/lib/connectors";
 
 const CONNECTOR_ENV = [
   "NOTION_MCP_URL",
@@ -57,5 +62,39 @@ describe("connectors", () => {
 
   it("returns null for a target whose connector is not configured", () => {
     expect(connectorForTarget("slack")).toBeNull();
+  });
+
+  it("falls back to Zapier for a target with no dedicated connector", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    expect(connectorForTarget("slack")?.name).toBe("zapier");
+    expect(connectorForTarget("notion")?.name).toBe("zapier");
+  });
+
+  it("prefers a dedicated connector over the Zapier fallback", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(connectorForTarget("slack")?.name).toBe("slack");
+    // Notion still has none of its own, so it keeps falling back.
+    expect(connectorForTarget("notion")?.name).toBe("zapier");
+  });
+
+  it("does not fall back when Zapier itself is the unconfigured connector", () => {
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(connectorForTarget("gmail")).toBeNull();
+    expect(connectorForTarget("telegram")).toBeNull();
+  });
+
+  it("reports nothing deliverable when no connector is configured", () => {
+    expect(deliverableTargets()).toEqual([]);
+  });
+
+  it("makes every target deliverable when only Zapier is configured", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    expect(deliverableTargets()).toEqual(["slack", "notion", "gmail", "telegram"]);
+  });
+
+  it("reports only the configured target when Zapier is absent", () => {
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(deliverableTargets()).toEqual(["slack"]);
   });
 });

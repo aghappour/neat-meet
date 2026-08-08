@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { connectorForTarget, mcpRequestFragments } from "@/lib/connectors";
+import { SHARE_TARGETS, connectorForTarget, mcpRequestFragments } from "@/lib/connectors";
 import type { Insight, ShareTarget } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_TARGETS: ShareTarget[] = ["slack", "notion", "gmail", "telegram"];
-
 // Delivering through the same MCP connector layer keeps write access consistent
 // with grounding — Claude calls the connector's tool to perform the send.
 const SYSTEM_PROMPT = `You deliver a short insight to a destination on the user's behalf using the connected MCP tools. Perform exactly one send to the requested destination and nothing else. Do not summarize or editorialize — send the provided text.
+
+Some connectors (Zapier) expose generic action tools rather than one tool per app: you first inspect the available actions to resolve the exact action key and its parameter schema, then execute that action. Do not guess an action key — resolve it first, then send once.
 
 After acting, respond with ONLY: { "ok": true, "detail": "what you did" } on success, or { "ok": false, "detail": "why it failed" } if you could not.`;
 
@@ -29,16 +29,18 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  if (!VALID_TARGETS.includes(target)) {
+  if (!SHARE_TARGETS.includes(target)) {
     return NextResponse.json({ error: `Unknown target: ${target}` }, { status: 400 });
   }
 
   const connector = connectorForTarget(target);
   if (!connector) {
+    // Reaching here means neither the dedicated connector nor the Zapier
+    // fallback is configured, so name both routes.
     const hint =
       target === "gmail" || target === "telegram"
-        ? "Configure ZAPIER_MCP_URL/ZAPIER_MCP_TOKEN and enable the Gmail/Telegram Zapier action."
-        : `Configure the ${target} MCP connector in .env.`;
+        ? `Set ZAPIER_MCP_URL in .env and enable the ${target} action on your Zapier MCP server.`
+        : `Set ${target.toUpperCase()}_MCP_URL in .env, or set ZAPIER_MCP_URL and enable the ${target} action on your Zapier MCP server.`;
     return NextResponse.json(
       { error: `No connector configured for ${target}. ${hint}` },
       { status: 400 },
@@ -53,7 +55,9 @@ export async function POST(req: Request) {
     const { mcp_servers, tools } = mcpRequestFragments([connector]);
     const params: Record<string, unknown> = {
       model: CLAUDE_MODEL,
-      max_tokens: 800,
+      // Generic-action connectors need an inspect call before the send, so the
+      // budget has to cover several tool-use turns plus the JSON verdict.
+      max_tokens: 4000,
       betas: ["mcp-client-2025-11-20"],
       system: SYSTEM_PROMPT,
       mcp_servers,

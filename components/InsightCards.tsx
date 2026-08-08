@@ -3,27 +3,32 @@
 import { useState } from "react";
 import type { Insight, ShareTarget } from "@/lib/types";
 
-const SHARE_TARGETS: { value: ShareTarget; label: string }[] = [
-  { value: "slack", label: "Slack" },
-  { value: "notion", label: "Notion" },
-  { value: "gmail", label: "Gmail" },
-  { value: "telegram", label: "Telegram" },
-];
+const TARGET_LABELS: Record<ShareTarget, string> = {
+  slack: "Slack",
+  notion: "Notion",
+  gmail: "Gmail",
+  telegram: "Telegram",
+};
 
 function ShareRow({
-  insight,
+  targets,
   onShare,
 }: {
-  insight: Insight;
+  /** Only targets a configured connector can deliver. */
+  targets: ShareTarget[];
   onShare: (target: ShareTarget, destination: string) => Promise<void>;
 }) {
-  const [target, setTarget] = useState<ShareTarget>("slack");
+  // Track the pick rather than seeding state from `targets`, which arrives
+  // asynchronously — seeding would strand the selection on a stale value.
+  const [picked, setPicked] = useState<ShareTarget | null>(null);
+  const target = picked && targets.includes(picked) ? picked : targets[0];
   const [destination, setDestination] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
+    if (!target) return;
     setBusy(true);
     setErr(null);
     try {
@@ -36,16 +41,25 @@ function ShareRow({
     }
   };
 
+  if (!target) {
+    return (
+      <p className="mt-2 text-xs text-muted">
+        No share destination configured — set a connector URL in <code>.env</code> to enable
+        sharing.
+      </p>
+    );
+  }
+
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <select
         value={target}
-        onChange={(e) => setTarget(e.target.value as ShareTarget)}
+        onChange={(e) => setPicked(e.target.value as ShareTarget)}
         className="rounded-md border border-edge bg-ink px-2 py-1 text-xs"
       >
-        {SHARE_TARGETS.map((t) => (
-          <option key={t.value} value={t.value}>
-            {t.label}
+        {targets.map((t) => (
+          <option key={t} value={t}>
+            {TARGET_LABELS[t]}
           </option>
         ))}
       </select>
@@ -73,17 +87,30 @@ export function InsightCards({
   onRefresh,
   onShare,
   disabled,
+  targets,
+  grounded,
 }: {
   insights: Insight[];
   loading: boolean;
   onRefresh: () => void;
   onShare: (insight: Insight, target: ShareTarget, destination: string) => Promise<void>;
   disabled: boolean;
+  /** Share targets a configured connector can deliver. */
+  targets: ShareTarget[];
+  /** Connector labels the last run was grounded in. */
+  grounded: string[];
 }) {
   return (
     <section className="flex h-full flex-col rounded-xl border border-edge bg-panel">
       <header className="flex items-center justify-between border-b border-edge px-4 py-3">
-        <span className="text-sm font-semibold text-slate-200">Insights to share</span>
+        <span className="flex items-baseline gap-2">
+          <span className="text-sm font-semibold text-slate-200">Insights to share</span>
+          {insights.length > 0 && (
+            <span className="text-xs text-muted">
+              {grounded.length > 0 ? `grounded in ${grounded.join(", ")}` : "from transcript only"}
+            </span>
+          )}
+        </span>
         <button
           onClick={onRefresh}
           disabled={disabled || loading}
@@ -112,7 +139,7 @@ export function InsightCards({
                 insight.source
               )}
             </p>
-            <ShareRow insight={insight} onShare={(t, d) => onShare(insight, t, d)} />
+            <ShareRow targets={targets} onShare={(t, d) => onShare(insight, t, d)} />
           </article>
         ))}
       </div>

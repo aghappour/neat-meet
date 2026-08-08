@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Insight,
   MeetingSummary,
@@ -23,6 +23,10 @@ interface MeetingState {
   summarizing: boolean;
   insights: Insight[];
   insightsLoading: boolean;
+  /** Connector labels the last insight run was grounded in, e.g. ["Notion"]. */
+  grounded: string[];
+  /** Share targets a configured connector can actually deliver. */
+  targets: ShareTarget[];
   profile: WhisperProfile;
 }
 
@@ -38,6 +42,8 @@ export function useMeeting() {
     summarizing: false,
     insights: [],
     insightsLoading: false,
+    grounded: [],
+    targets: [],
     // Default to the profile that keeps up on a CPU-only machine — `capable`
     // needs a CUDA GPU to hit its latency target.
     profile: "modest",
@@ -53,6 +59,22 @@ export function useMeeting() {
   }, []);
 
   const setProfile = useCallback((profile: WhisperProfile) => patch({ profile }), [patch]);
+
+  // Ask once which connectors are configured, so the share menu offers only
+  // targets that can actually deliver. On failure we leave `targets` empty —
+  // the UI then says nothing is configured rather than offering dead options.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/connectors")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { targets?: ShareTarget[] } | null) => {
+        if (!cancelled && data?.targets) patch({ targets: data.targets });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [patch]);
 
   const cleanup = useCallback(() => {
     wsRef.current?.close();
@@ -223,8 +245,11 @@ export function useMeeting() {
         body: JSON.stringify({ sessionId: sessionIdRef.current }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Insights failed");
-      const { insights } = (await res.json()) as { insights: Insight[] };
-      patch({ insights, insightsLoading: false });
+      const { insights, grounded } = (await res.json()) as {
+        insights: Insight[];
+        grounded?: string[];
+      };
+      patch({ insights, grounded: grounded ?? [], insightsLoading: false });
     } catch (err) {
       patch({ insightsLoading: false, error: (err as Error).message });
     }

@@ -95,6 +95,8 @@ export default function Page() {
           <InsightCards
             insights={state.insights}
             loading={state.insightsLoading}
+            targets={state.targets}
+            grounded={state.grounded}
             onRefresh={refreshInsights}
             onShare={async (insight, target, destination) => {
               await share(insight, target, destination);

@@ -31,28 +31,54 @@ const SPECS: ConnectorSpec[] = [
   { name: "notion", label: "Notion", urlEnv: "NOTION_MCP_URL", tokenEnv: "NOTION_MCP_TOKEN", shareTargets: ["notion"] },
   { name: "slack", label: "Slack", urlEnv: "SLACK_MCP_URL", tokenEnv: "SLACK_MCP_TOKEN", shareTargets: ["slack"] },
   { name: "gdrive", label: "Google Drive", urlEnv: "GDRIVE_MCP_URL", tokenEnv: "GDRIVE_MCP_TOKEN", shareTargets: [] },
-  { name: "zapier", label: "Zapier (Gmail, Telegram)", urlEnv: "ZAPIER_MCP_URL", tokenEnv: "ZAPIER_MCP_TOKEN", shareTargets: ["gmail", "telegram"] },
+  // Label stays generic: Zapier is also the fallback for targets whose own
+  // connector isn't configured, so naming specific apps here understates it.
+  { name: "zapier", label: "Zapier", urlEnv: "ZAPIER_MCP_URL", tokenEnv: "ZAPIER_MCP_TOKEN", shareTargets: ["gmail", "telegram"] },
 ];
 
-/** Connectors that have a URL configured (token is optional). */
-export function enabledConnectors(): Connector[] {
-  const out: Connector[] = [];
-  for (const spec of SPECS) {
-    const url = process.env[spec.urlEnv];
-    if (url) {
-      out.push({ name: spec.name, label: spec.label, url, token: process.env[spec.tokenEnv] ?? "" });
-    }
-  }
-  return out;
-}
+/** Every share target the app knows how to deliver, in UI order. */
+export const SHARE_TARGETS: ShareTarget[] = ["slack", "notion", "gmail", "telegram"];
 
-/** The connector that can deliver a given share target, if configured. */
-export function connectorForTarget(target: ShareTarget): Connector | null {
-  const spec = SPECS.find((s) => s.shareTargets.includes(target));
-  if (!spec) return null;
+/** Resolve a spec against the environment, or null when it has no URL. */
+function fromSpec(spec: ConnectorSpec): Connector | null {
   const url = process.env[spec.urlEnv];
   if (!url) return null;
   return { name: spec.name, label: spec.label, url, token: process.env[spec.tokenEnv] ?? "" };
+}
+
+/** Connectors that have a URL configured (token is optional). */
+export function enabledConnectors(): Connector[] {
+  return SPECS.map(fromSpec).filter((c): c is Connector => c !== null);
+}
+
+/**
+ * The connector that can deliver a given share target.
+ *
+ * Prefers the target's dedicated connector, then falls back to Zapier. Zapier
+ * fans out to whichever apps are enabled on the account, so a Zapier-only setup
+ * can usually deliver Slack or Notion even with no dedicated connector for
+ * them — without the fallback those sends are rejected outright despite being
+ * perfectly deliverable.
+ */
+export function connectorForTarget(target: ShareTarget): Connector | null {
+  const spec = SPECS.find((s) => s.shareTargets.includes(target));
+  const direct = spec ? fromSpec(spec) : null;
+  if (direct) return direct;
+
+  const zapier = SPECS.find((s) => s.name === "zapier");
+  // Nothing to fall back to when the target already routes through Zapier.
+  if (!zapier || spec === zapier) return null;
+  return fromSpec(zapier);
+}
+
+/**
+ * Share targets a connector can actually deliver right now.
+ *
+ * Lets the UI offer only what will work instead of surfacing every target and
+ * letting the send fail with a 400 after the user has picked one.
+ */
+export function deliverableTargets(): ShareTarget[] {
+  return SHARE_TARGETS.filter((t) => connectorForTarget(t) !== null);
 }
 
 /**
