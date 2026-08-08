@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
 import { SHARE_TARGETS, connectorForTarget, mcpRequestFragments } from "@/lib/connectors";
+import { directTargets, sendViaZapier } from "@/lib/zapier";
 import type { Insight, ShareTarget } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -47,7 +48,23 @@ export async function POST(req: Request) {
     );
   }
 
-  const text = `${insight.title}\n\n${insight.insight}${insight.url ? `\n\n${insight.url}` : ""}`;
+  const body_text = `${insight.insight}${insight.url ? `\n\n${insight.url}` : ""}`;
+
+  // Fast path. This send is fully specified — this text, this target, this
+  // destination — so there is no decision a model needs to make. Going direct
+  // skips the Anthropic API entirely, which means sharing keeps working with no
+  // API credits, no added latency, and no chance of the model picking the wrong
+  // action. Anything Zapier can't deliver directly falls through to Claude.
+  if (connector.name === "zapier" && directTargets().includes(target)) {
+    try {
+      const { detail } = await sendViaZapier(target, destination, insight.title, body_text);
+      return NextResponse.json({ ok: true, detail });
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 502 });
+    }
+  }
+
+  const text = `${insight.title}\n\n${body_text}`;
   const instruction = `Send this insight to ${target} destination "${destination}":\n\n${text}`;
 
   try {
