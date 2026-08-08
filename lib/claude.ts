@@ -3,23 +3,25 @@ import Anthropic from "@anthropic-ai/sdk";
 let client: Anthropic | null = null;
 
 /**
- * Lazily construct the Anthropic client. Credentials are resolved by the SDK in
- * order: ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → an `ant auth login` OAuth
- * profile. So you can either set a key in .env, or run `ant auth login` (the
- * Anthropic CLI) and manage no raw key at all.
+ * Lazily construct the Anthropic client.
+ *
+ * No key check of our own — that would reject a perfectly good CLI login. The
+ * SDK resolves ANTHROPIC_API_KEY, then ANTHROPIC_AUTH_TOKEN. It does NOT read
+ * the `ant auth login` OAuth profile at the pinned version (0.68): a zero-arg
+ * client fails with "Could not resolve authentication method" even when
+ * `ant auth status` reports an active profile. `npm run dev:auth` bridges that
+ * gap by exporting the CLI session into ANTHROPIC_AUTH_TOKEN.
  */
 export function getClient(): Anthropic {
   if (client) return client;
   try {
-    // Zero-arg constructor performs the full credential resolution above.
     client = new Anthropic();
     return client;
   } catch {
     throw new Error(
       "No Anthropic credentials found. Either set ANTHROPIC_API_KEY in .env, or run " +
-        "`ant auth login` (Anthropic CLI) so credentials resolve automatically. If you used " +
-        '`ant auth login` and still see this, run `eval "$(ant auth print-credentials --env)"` ' +
-        "in the shell before starting the app.",
+        "`ant auth login` and start the app with `npm run dev:auth`, which exports the CLI " +
+        "session into ANTHROPIC_AUTH_TOKEN (the SDK does not read the OAuth profile itself).",
     );
   }
 }
