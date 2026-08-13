@@ -21,29 +21,48 @@ export function SummaryPane({
   loading,
   onRefresh,
   disabled,
+  auto,
+  onToggleAuto,
 }: {
   summary: MeetingSummary | null;
   loading: boolean;
   onRefresh: () => void;
   disabled: boolean;
+  auto: boolean;
+  onToggleAuto: (next: boolean) => void;
 }) {
   return (
     <section className="flex h-full flex-col rounded-xl border border-edge bg-panel">
       <header className="flex items-center justify-between border-b border-edge px-4 py-3">
         <span className="text-sm font-semibold text-slate-200">Rolling summary</span>
-        <button
-          onClick={onRefresh}
-          disabled={disabled || loading}
-          className="rounded-md border border-edge px-2 py-1 text-xs text-slate-300 hover:bg-edge disabled:opacity-40"
-        >
-          {loading ? "Summarizing…" : "Refresh"}
-        </button>
+        <div className="flex items-center gap-2">
+          <label
+            className="flex cursor-pointer items-center gap-1 text-xs text-muted"
+            title="Re-summarize automatically as the conversation grows"
+          >
+            <input
+              type="checkbox"
+              checked={auto}
+              onChange={(e) => onToggleAuto(e.target.checked)}
+              className="h-3 w-3 accent-accent"
+            />
+            Auto
+          </label>
+          <button
+            onClick={onRefresh}
+            disabled={disabled || loading}
+            className="rounded-md border border-edge px-2 py-1 text-xs text-slate-300 hover:bg-edge disabled:opacity-40"
+          >
+            {loading ? "Summarizing…" : "Refresh"}
+          </button>
+        </div>
       </header>
       <div className="thin-scroll flex-1 space-y-4 overflow-y-auto p-4">
         {!summary && !loading && (
           <p className="text-sm text-muted">
-            Refresh to summarize the conversation so far — gist, decisions, open questions, and
-            action items.
+            {auto
+              ? "Summarizing automatically as the conversation grows — gist, decisions, open questions, and action items. Or hit Refresh anytime."
+              : "Refresh to summarize the conversation so far — gist, decisions, open questions, and action items."}
           </p>
         )}
         {summary && (

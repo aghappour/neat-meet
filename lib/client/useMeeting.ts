@@ -21,6 +21,8 @@ interface MeetingState {
   interims: Record<string, TranscriptSegment | undefined>;
   summary: MeetingSummary | null;
   summarizing: boolean;
+  /** When on, the summary re-runs on an interval while the meeting is live. */
+  autoSummary: boolean;
   insights: Insight[];
   insightsLoading: boolean;
   /** Connector labels the last insight run was grounded in, e.g. ["Notion"]. */
@@ -31,6 +33,8 @@ interface MeetingState {
 }
 
 const WS_PATH = "/api/audio";
+/** How often the rolling summary re-runs while live (when there's new transcript). */
+const SUMMARY_REFRESH_MS = 20_000;
 
 export function useMeeting() {
   const [state, setState] = useState<MeetingState>({
@@ -40,6 +44,7 @@ export function useMeeting() {
     interims: {},
     summary: null,
     summarizing: false,
+    autoSummary: true,
     insights: [],
     insightsLoading: false,
     grounded: [],
@@ -53,12 +58,30 @@ export function useMeeting() {
   const ctxRef = useRef<AudioContext | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
   const sessionIdRef = useRef<string>("");
+  // Refs the auto-refresh interval reads without re-subscribing each tick:
+  // current final-segment count, whether a summary is already in flight, and
+  // the count captured at the last summary request (to skip when nothing new).
+  const segmentCountRef = useRef(0);
+  const summarizingRef = useRef(false);
+  const lastSummarizedCountRef = useRef(0);
 
   const patch = useCallback((p: Partial<MeetingState>) => {
     setState((s) => ({ ...s, ...p }));
   }, []);
 
   const setProfile = useCallback((profile: WhisperProfile) => patch({ profile }), [patch]);
+  const setAutoSummary = useCallback(
+    (autoSummary: boolean) => patch({ autoSummary }),
+    [patch],
+  );
+
+  // Keep the interval's refs in step with render state (see the interval below).
+  useEffect(() => {
+    segmentCountRef.current = state.segments.length;
+  }, [state.segments.length]);
+  useEffect(() => {
+    summarizingRef.current = state.summarizing;
+  }, [state.summarizing]);
 
   // Ask once which connectors are configured, so the share menu offers only
   // targets that can actually deliver. On failure we leave `targets` empty —
@@ -111,6 +134,7 @@ export function useMeeting() {
     // Each start mints a new sessionId, and the server numbers segments from 1
     // per session — so carrying the previous meeting's state over would collide
     // on segment id and blend two transcripts into one pane.
+    lastSummarizedCountRef.current = 0;
     patch({
       status: "connecting",
       error: null,
@@ -220,6 +244,9 @@ export function useMeeting() {
 
   const refreshSummary = useCallback(async () => {
     if (!sessionIdRef.current) return;
+    // Remember how much transcript this run covers, so auto-refresh can tell
+    // whether anything new has been said since (and skip a redundant call).
+    const requestCount = segmentCountRef.current;
     patch({ summarizing: true });
     try {
       const res = await fetch("/api/summary", {
@@ -229,11 +256,25 @@ export function useMeeting() {
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Summary failed");
       const summary = (await res.json()) as MeetingSummary;
+      lastSummarizedCountRef.current = requestCount;
       patch({ summary, summarizing: false });
     } catch (err) {
       patch({ summarizing: false, error: (err as Error).message });
     }
   }, [patch]);
+
+  // Auto-refresh the rolling summary while live. Fires on an interval but only
+  // when new final segments have arrived since the last summary and none is
+  // already in flight — so quiet stretches and slow responses don't stack calls.
+  useEffect(() => {
+    if (state.status !== "live" || !state.autoSummary) return;
+    const id = setInterval(() => {
+      if (summarizingRef.current) return;
+      if (segmentCountRef.current <= lastSummarizedCountRef.current) return;
+      void refreshSummary();
+    }, SUMMARY_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [state.status, state.autoSummary, refreshSummary]);
 
   const refreshInsights = useCallback(async () => {
     if (!sessionIdRef.current) return;
@@ -268,5 +309,14 @@ export function useMeeting() {
     [],
   );
 
-  return { state, setProfile, start, stop, refreshSummary, refreshInsights, share };
+  return {
+    state,
+    setProfile,
+    setAutoSummary,
+    start,
+    stop,
+    refreshSummary,
+    refreshInsights,
+    share,
+  };
 }

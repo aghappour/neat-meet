@@ -14,7 +14,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function Page() {
-  const { state, setProfile, start, stop, refreshSummary, refreshInsights, share } = useMeeting();
+  const { state, setProfile, setAutoSummary, start, stop, refreshSummary, refreshInsights, share } =
+    useMeeting();
   const live = state.status === "live";
   const notStarted = state.status === "idle" || state.status === "error";
 
@@ -89,6 +90,8 @@ export default function Page() {
             loading={state.summarizing}
             onRefresh={refreshSummary}
             disabled={state.segments.length === 0}
+            auto={state.autoSummary}
+            onToggleAuto={setAutoSummary}
           />
         </div>
         <div className="min-h-0 lg:col-span-1">
