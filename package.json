@@ -4,6 +4,7 @@
   "private": true,
   "description": "Real-time meeting assistant: live transcript, rolling summary, and shareable insights grounded in your connected knowledge.",
   "scripts": {
+    "setup": "bash scripts/setup.sh",
     "dev": "tsx server.ts",
     "dev:auth": "set -a; eval \"$(ant auth print-credentials --env)\"; set +a; [ -n \"$ANTHROPIC_AUTH_TOKEN\" ] || { echo 'No Anthropic credentials. Run: ant auth login' >&2; exit 1; }; tsx server.ts",
     "build": "next build",
