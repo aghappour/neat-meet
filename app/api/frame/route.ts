@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { SUMMARY_MODEL, effortConfig, firstText, getClient } from "@/lib/claude";
+import { scrubPii } from "@/lib/redact";
 import { addSlideContext } from "@/lib/session-store";
 
 export const runtime = "nodejs";
@@ -21,8 +22,9 @@ function parseDataUrl(dataUrl: string): { mediaType: string; data: string } | nu
 export async function POST(req: Request) {
   let sessionId: string;
   let image: string;
+  let scrub: boolean | undefined;
   try {
-    ({ sessionId, image } = await req.json());
+    ({ sessionId, image, scrubPii: scrub } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -52,8 +54,12 @@ export async function POST(req: Request) {
       ],
     };
     const res = await client.messages.create(params as never);
-    const text = firstText(res.content as never).trim();
+    let text = firstText(res.content as never).trim();
     if (!text) return NextResponse.json({ error: "No content extracted from frame" }, { status: 502 });
+    // Scrub the EXTRACTED text before storing. Note: the frame image itself was
+    // already sent (this endpoint is opt-in per click); scrubbing an image
+    // isn't possible — documented in the README's privacy section.
+    if (scrub) text = scrubPii(text);
     const item = addSlideContext(sessionId, text);
     return NextResponse.json({ item });
   } catch (err) {

@@ -19,12 +19,15 @@ export default function Page() {
     setProfile,
     setAutoSummary,
     setSpeakerName,
+    setBlockConnectors,
+    setScrubPii,
     start,
     stop,
     refreshSummary,
     refreshInsights,
     share,
     captureFrame,
+    exportMeeting,
   } = useMeeting();
   const live = state.status === "live";
   const notStarted = state.status === "idle" || state.status === "error";
@@ -39,7 +42,72 @@ export default function Page() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex items-center gap-2 rounded-full border border-edge px-3 py-1">
+            <label
+              className="flex cursor-pointer items-center gap-1 text-xs text-muted"
+              title="Privacy hold: attach no connectors to insights and disable sharing/export for this meeting"
+            >
+              <input
+                type="checkbox"
+                checked={state.blockConnectors}
+                onChange={(e) => setBlockConnectors(e.target.checked)}
+                className="h-3 w-3 accent-accent"
+              />
+              Hold connectors
+            </label>
+            <label
+              className="flex cursor-pointer items-center gap-1 text-xs text-muted"
+              title="Scrub emails, phone numbers, SSNs, card numbers, and IPs from text before it leaves for Claude (captured slide images can't be scrubbed)"
+            >
+              <input
+                type="checkbox"
+                checked={state.scrubPii}
+                onChange={(e) => setScrubPii(e.target.checked)}
+                className="h-3 w-3 accent-accent"
+              />
+              Scrub PII
+            </label>
+          </span>
+
+          {state.segments.length > 0 && (
+            <span className="flex items-center gap-1">
+              <button
+                onClick={() => exportMeeting("markdown")}
+                title="Download transcript + summary + insights as a markdown file (local, always available)"
+                className="rounded-md border border-edge px-2 py-1 text-xs text-slate-300 hover:bg-edge"
+              >
+                ⬇ .md
+              </button>
+              {state.exportTargets.includes("notion") && (
+                <button
+                  onClick={() => exportMeeting("notion")}
+                  disabled={state.exporting || state.blockConnectors}
+                  title={state.blockConnectors ? "Disabled while connectors are held" : "Save to a new Notion page"}
+                  className="rounded-md border border-edge px-2 py-1 text-xs text-slate-300 hover:bg-edge disabled:opacity-40"
+                >
+                  → Notion
+                </button>
+              )}
+              {state.exportTargets.includes("gdrive") && (
+                <button
+                  onClick={() => exportMeeting("gdrive")}
+                  disabled={state.exporting || state.blockConnectors}
+                  title={state.blockConnectors ? "Disabled while connectors are held" : "Save to a new Google Drive document"}
+                  className="rounded-md border border-edge px-2 py-1 text-xs text-slate-300 hover:bg-edge disabled:opacity-40"
+                >
+                  → Drive
+                </button>
+              )}
+              {state.exporting && <span className="text-xs text-muted">saving…</span>}
+              {state.exportDetail && !state.exporting && (
+                <span className="max-w-48 truncate text-xs text-emerald-300" title={state.exportDetail}>
+                  ✓ {state.exportDetail}
+                </span>
+              )}
+            </span>
+          )}
+
           <span
             className={`inline-flex items-center gap-2 rounded-full border border-edge px-3 py-1 text-xs ${
               live ? "text-emerald-300" : state.status === "error" ? "text-red-400" : "text-muted"

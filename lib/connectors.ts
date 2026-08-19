@@ -37,7 +37,7 @@ const SPECS: ConnectorSpec[] = [
 ];
 
 /** Every share target the app knows how to deliver, in UI order. */
-export const SHARE_TARGETS: ShareTarget[] = ["slack", "notion", "gmail", "telegram"];
+export const SHARE_TARGETS: ShareTarget[] = ["slack", "notion", "gmail", "telegram", "signal"];
 
 /** Resolve a spec against the environment, or null when it has no URL. */
 function fromSpec(spec: ConnectorSpec): Connector | null {
@@ -61,6 +61,9 @@ export function enabledConnectors(): Connector[] {
  * perfectly deliverable.
  */
 export function connectorForTarget(target: ShareTarget): Connector | null {
+  // Signal is delivered by the LOCAL signal-cli bridge (lib/signal.ts), never
+  // by an MCP connector — and it must not fall through to Zapier.
+  if (target === "signal") return null;
   const spec = SPECS.find((s) => s.shareTargets.includes(target));
   const direct = spec ? fromSpec(spec) : null;
   if (direct) return direct;
@@ -79,6 +82,19 @@ export function connectorForTarget(target: ShareTarget): Connector | null {
  */
 export function deliverableTargets(): ShareTarget[] {
   return SHARE_TARGETS.filter((t) => connectorForTarget(t) !== null);
+}
+
+/**
+ * The connector that can create documents for a post-meeting export target.
+ * Notion → the Notion connector; Drive → the Drive connector; either falls
+ * back to Zapier when the dedicated connector isn't configured.
+ */
+export function connectorForExport(target: "notion" | "gdrive"): Connector | null {
+  const spec = SPECS.find((s) => s.name === target);
+  const direct = spec ? fromSpec(spec) : null;
+  if (direct) return direct;
+  const zapier = SPECS.find((s) => s.name === "zapier");
+  return zapier ? fromSpec(zapier) : null;
 }
 
 /**

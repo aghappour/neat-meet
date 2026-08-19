@@ -117,9 +117,36 @@ attaches your configured MCP servers to Claude, which searches them for relevant
 material and can post back. Configure only the services you want; the app runs
 with whatever subset you provide.
 
-**Signal** has no official API or Zapier integration, so it is intentionally not
-wired up. The only way in is an unofficial `signal-cli` linked-device bridge run
-locally — a possible future add-on, not part of this build.
+**Signal** has no official API or Zapier integration, so it is delivered by an
+**unofficial local `signal-cli` bridge** instead of a connector: signal-cli links
+to your phone as a secondary device and runs as a local daemon; the app talks to
+it over localhost only. Setup (once): install
+[signal-cli](https://github.com/AsamK/signal-cli), run `signal-cli link -n
+"neat-meet"` and scan the QR with your phone, start `signal-cli daemon --http
+127.0.0.1:8686`, and set `SIGNAL_CLI_URL=http://127.0.0.1:8686/api/v1/rpc` in
+`.env`. Share destinations are a phone number (`+1555…`) or a signal-cli group
+id. Caveats: unofficial (can break on Signal updates) and uses one linked-device
+slot.
+
+### Redaction controls
+
+Two per-meeting toggles in the header (reset each meeting):
+
+- **Hold connectors** — a privacy hold: insights run from the meeting text alone
+  (no MCP servers attached), and sharing/exporting is disabled outright.
+- **Scrub PII** — emails, phone numbers, SSNs, card numbers, and IPs are redacted
+  (locally, by regex) from all text before it leaves for Claude or any connector.
+  Limitation: a captured slide **image** can't be scrubbed — only the text
+  extracted from it is.
+
+### Post-meeting export
+
+Once there's a transcript, header buttons export the meeting — final summary,
+insights, shared docs, captured slides, full transcript, and chat — as:
+
+- **⬇ .md** — a local markdown download (no API call; works even with connectors held)
+- **→ Notion / → Drive** — a new page/document created through your connector
+  (shown only when configured; respects both redaction toggles)
 
 ## Scripts
 

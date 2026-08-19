@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
 import { SHARE_TARGETS, connectorForTarget, mcpRequestFragments } from "@/lib/connectors";
 import { directTargets, sendViaZapier } from "@/lib/zapier";
+import { scrubPii } from "@/lib/redact";
+import { sendSignal, signalEnabled } from "@/lib/signal";
 import type { Insight, ShareTarget } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,13 +18,27 @@ Some connectors (Zapier) expose generic action tools rather than one tool per ap
 After acting, respond with ONLY: { "ok": true, "detail": "what you did" } on success, or { "ok": false, "detail": "why it failed" } if you could not.`;
 
 export async function POST(req: Request) {
-  let body: { insight?: Insight; target?: ShareTarget; destination?: string };
+  let body: {
+    insight?: Insight;
+    target?: ShareTarget;
+    destination?: string;
+    blockConnectors?: boolean;
+    scrubPii?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
   const { insight, target, destination } = body;
+
+  // Per-meeting privacy hold: nothing leaves the app while the toggle is on.
+  if (body.blockConnectors) {
+    return NextResponse.json(
+      { error: 'Sharing is disabled for this meeting ("Hold connectors" is on).' },
+      { status: 403 },
+    );
+  }
 
   if (!insight || !target || !destination) {
     return NextResponse.json(
@@ -32,6 +48,30 @@ export async function POST(req: Request) {
   }
   if (!SHARE_TARGETS.includes(target)) {
     return NextResponse.json({ error: `Unknown target: ${target}` }, { status: 400 });
+  }
+
+  // Optional PII scrub of the outbound text (local regex, no API call).
+  const clean = (s: string) => (body.scrubPii ? scrubPii(s) : s);
+  const title = clean(insight.title);
+  const insightText = clean(insight.insight);
+
+  // Signal goes through the LOCAL signal-cli bridge — no MCP, no Claude call.
+  if (target === "signal") {
+    if (!signalEnabled()) {
+      return NextResponse.json(
+        { error: "Signal is not configured. Set SIGNAL_CLI_URL in .env (see README)." },
+        { status: 400 },
+      );
+    }
+    try {
+      const detail = await sendSignal(
+        destination,
+        `${title}\n\n${insightText}${insight.url ? `\n${insight.url}` : ""}`,
+      );
+      return NextResponse.json({ ok: true, detail });
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 502 });
+    }
   }
 
   const connector = connectorForTarget(target);
@@ -48,7 +88,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const body_text = `${insight.insight}${insight.url ? `\n\n${insight.url}` : ""}`;
+  const body_text = `${insightText}${insight.url ? `\n\n${insight.url}` : ""}`;
 
   // Fast path. This send is fully specified — this text, this target, this
   // destination — so there is no decision a model needs to make. Going direct
@@ -57,14 +97,14 @@ export async function POST(req: Request) {
   // action. Anything Zapier can't deliver directly falls through to Claude.
   if (connector.name === "zapier" && directTargets().includes(target)) {
     try {
-      const { detail } = await sendViaZapier(target, destination, insight.title, body_text);
+      const { detail } = await sendViaZapier(target, destination, title, body_text);
       return NextResponse.json({ ok: true, detail });
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 502 });
     }
   }
 
-  const text = `${insight.title}\n\n${body_text}`;
+  const text = `${title}\n\n${body_text}`;
   const instruction = `Send this insight to ${target} destination "${destination}":\n\n${text}`;
 
   try {

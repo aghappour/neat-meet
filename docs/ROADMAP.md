@@ -55,6 +55,16 @@ they're tested), and where to go next.
   said. The summary and slide-extraction paths default to Haiku 4.5
   (`SUMMARY_MODEL`, ~3x cheaper than Sonnet); insights keep `CLAUDE_MODEL`
   (Sonnet) for MCP tool use. Auto-refresh runs at 30s.
+
+### Privacy & delivery
+- **Redaction controls** — per-meeting **Hold connectors** (insights run
+  transcript-only; sharing/export disabled) and **Scrub PII** (local regex
+  redaction of emails/phones/SSNs/cards/IPs before text leaves for Claude or a
+  connector; slide images can't be scrubbed — only their extracted text).
+- **Signal sharing** — via an unofficial local `signal-cli` linked-device bridge
+  (`SIGNAL_CLI_URL`); localhost-only, never routed through MCP/Zapier.
+- **Post-meeting export** — one click to a local `.md` download (no API), or to
+  a new Notion page / Drive document through the connector layer.
 - **One-click share** — push an insight to Slack / Notion / Gmail / Telegram
   (Gmail + Telegram fan out through Zapier).
 
@@ -81,7 +91,7 @@ they're tested), and where to go next.
 6. **The Meet extension** runs only on `meet.google.com`, reads only caption
    text, and sends only to `localhost`.
 
-### What the tests pin (`npm test` — 48 tests)
+### What the tests pin (`npm test` — 59 tests)
 - **`lib/privacy.test.ts`**
   - No connector is attached when none is configured; no share target offered.
   - An auth token is never sent unless explicitly set.
@@ -97,6 +107,12 @@ they're tested), and where to go next.
   overrides, caption routing, and context (chat → chat/doc, slide extraction,
   context-as-content).
 - **`lib/claude.test.ts`** — client resolution + tolerant JSON parsing.
+- **`lib/redact.test.ts`** — the PII scrubber redacts emails/phones/SSNs/cards/IPs
+  and leaves ordinary meeting text (years, ids, short numbers) untouched.
+- **`lib/export.test.ts`** — the export markdown compiles all sections and omits
+  empty ones.
+- Signal routing: `connectorForTarget("signal")` is pinned to null — Signal can
+  never silently fall through to an MCP/Zapier connector.
 
 ### Honest gaps (not yet automated)
 - The **extension → server → app caption path** is verified by a manual smoke
@@ -117,10 +133,6 @@ they're tested), and where to go next.
   resolved vitest 2 — verify a clean `npm ci` installs the intended versions.
 
 ### P2 — product
-- **Post-meeting export** — save transcript + final summary + insights to
-  Notion / Drive / a markdown file in one click.
-- **Redaction controls** — a per-meeting "don't send to connectors" toggle and
-  optional PII scrubbing before anything leaves for Claude.
 - **Graceful billing/error surfaces** — show "add API credits" / "invalid key"
   inline in the panes instead of a raw error.
 
@@ -130,5 +142,3 @@ they're tested), and where to go next.
 - **Meeting-bot transcription** (e.g. self-hosted Vexa, or Recall.ai) as an
   optional real-time multi-party attribution source — documented tradeoff:
   a bot joins and audio leaves the machine.
-- **Signal** via an unofficial `signal-cli` linked-device bridge (no official
-  API/Zapier path exists).

@@ -97,7 +97,10 @@ export interface MeetingSummary {
 }
 
 /** Where a shared insight should be delivered. */
-export type ShareTarget = "slack" | "notion" | "gmail" | "telegram";
+export type ShareTarget = "slack" | "notion" | "gmail" | "telegram" | "signal";
+
+/** Where a post-meeting export lands. "markdown" is a local file download. */
+export type ExportTarget = "markdown" | "notion" | "gdrive";
 
 /** One timestamped rolling-summary generation, retained for the history view. */
 export interface SummaryVersion {

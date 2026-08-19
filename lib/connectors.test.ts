@@ -97,4 +97,10 @@ describe("connectors", () => {
     process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
     expect(deliverableTargets()).toEqual(["slack"]);
   });
+
+  it("never routes signal through an MCP connector (local bridge only)", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    process.env.NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+    expect(connectorForTarget("signal")).toBeNull();
+  });
 });

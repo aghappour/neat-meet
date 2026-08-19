@@ -8,6 +8,7 @@ const TARGET_LABELS: Record<ShareTarget, string> = {
   notion: "Notion",
   gmail: "Gmail",
   telegram: "Telegram",
+  signal: "Signal",
 };
 
 function ShareRow({

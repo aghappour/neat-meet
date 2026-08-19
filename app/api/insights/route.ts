@@ -9,6 +9,7 @@ import {
 } from "@/lib/claude";
 import { cappedTranscript, contextText, hasContent, type SpeakerNames } from "@/lib/session-store";
 import { enabledConnectors, mcpRequestFragments } from "@/lib/connectors";
+import { scrubPii } from "@/lib/redact";
 import type { Insight } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -30,8 +31,10 @@ Keep insights specific and immediately useful. Prefer grounded facts over generi
 export async function POST(req: Request) {
   let sessionId: string;
   let speakerNames: SpeakerNames | undefined;
+  let blockConnectors: boolean | undefined;
+  let scrub: boolean | undefined;
   try {
-    ({ sessionId, speakerNames } = await req.json());
+    ({ sessionId, speakerNames, blockConnectors, scrubPii: scrub } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -41,13 +44,18 @@ export async function POST(req: Request) {
   }
 
   // Whole meeting, but capped to bound cost on long meetings.
-  const { text: transcript, truncated } = cappedTranscript(
-    sessionId,
-    TRANSCRIPT_MAX_CHARS,
-    speakerNames,
-  );
-  const context = contextText(sessionId, CONTEXT_MAX_CHARS);
-  const connectors = enabledConnectors();
+  const capped = cappedTranscript(sessionId, TRANSCRIPT_MAX_CHARS, speakerNames);
+  const truncated = capped.truncated;
+  let transcript = capped.text;
+  let context = contextText(sessionId, CONTEXT_MAX_CHARS);
+  // Optional PII scrub (local regex) of everything that leaves for Claude.
+  if (scrub) {
+    transcript = scrubPii(transcript);
+    context = scrubPii(context);
+  }
+  // Privacy hold: with connectors blocked, insights come from the meeting text
+  // alone — no MCP servers are attached, so nothing reaches those services.
+  const connectors = blockConnectors ? [] : enabledConnectors();
 
   try {
     const client = getClient();

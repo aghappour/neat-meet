@@ -17,6 +17,7 @@ import {
   transcriptSince,
   type SpeakerNames,
 } from "@/lib/session-store";
+import { scrubPii, scrubPiiDeep } from "@/lib/redact";
 import type { MeetingSummary } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -41,9 +42,16 @@ export async function POST(req: Request) {
   let previousSummary: MeetingSummary | undefined;
   let afterSegmentId: number | undefined;
   let afterContextId: number | undefined;
+  let scrub: boolean | undefined;
   try {
-    ({ sessionId, speakerNames, previousSummary, afterSegmentId, afterContextId } =
-      await req.json());
+    ({
+      sessionId,
+      speakerNames,
+      previousSummary,
+      afterSegmentId,
+      afterContextId,
+      scrubPii: scrub,
+    } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -90,6 +98,14 @@ export async function POST(req: Request) {
     newLastSegmentId = lastSegmentId(sessionId);
     context = contextText(sessionId, CONTEXT_MAX_CHARS);
     newLastContextId = contextSince(sessionId, 0).lastId;
+  }
+
+  // Optional PII scrub (local regex) of everything that leaves for Claude —
+  // the transcript, the shared context, and the folded-in prior summary.
+  if (scrub) {
+    transcript = scrubPii(transcript);
+    context = scrubPii(context);
+    if (previousSummary) previousSummary = scrubPiiDeep(previousSummary);
   }
 
   const prior = delta

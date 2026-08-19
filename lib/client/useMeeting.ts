@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { buildMeetingMarkdown } from "@/lib/export";
 import type {
   ContextItem,
+  ExportTarget,
   Insight,
   InsightsVersion,
   MeetingSummary,
@@ -47,6 +49,16 @@ interface MeetingState {
   context: ContextItem[];
   /** True while a captured video frame is being sent to Claude for extraction. */
   capturingFrame: boolean;
+  /** Privacy hold: no MCP connectors attached, sharing/export disabled. Per-meeting. */
+  blockConnectors: boolean;
+  /** Scrub PII (emails/phones/SSNs/cards/IPs) from text before it leaves for Claude. */
+  scrubPii: boolean;
+  /** Export targets a configured connector can save to ("markdown" always works). */
+  exportTargets: Array<"notion" | "gdrive">;
+  /** True while a Notion/Drive export is in flight. */
+  exporting: boolean;
+  /** Success detail from the last export, e.g. a link. */
+  exportDetail: string | null;
 }
 
 const WS_PATH = "/api/audio";
@@ -117,6 +129,11 @@ export function useMeeting() {
     captionsActive: false,
     context: [],
     capturingFrame: false,
+    blockConnectors: false,
+    scrubPii: false,
+    exportTargets: [],
+    exporting: false,
+    exportDetail: null,
     targets: [],
     // Default to the profile that keeps up on a CPU-only machine — `capable`
     // needs a CUDA GPU to hit its latency target.
@@ -144,6 +161,8 @@ export function useMeeting() {
   // are sent on the next call, keeping steady-state cost small and flat.
   const lastSummarizedSegmentIdRef = useRef<number | null>(null);
   const lastSummarizedContextIdRef = useRef<number>(0);
+  // Privacy toggles, mirrored so the stable callbacks read the current values.
+  const privacyRef = useRef({ blockConnectors: false, scrubPii: false });
 
   const patch = useCallback((p: Partial<MeetingState>) => {
     setState((s) => ({ ...s, ...p }));
@@ -152,6 +171,21 @@ export function useMeeting() {
   const setProfile = useCallback((profile: WhisperProfile) => patch({ profile }), [patch]);
   const setAutoSummary = useCallback(
     (autoSummary: boolean) => patch({ autoSummary }),
+    [patch],
+  );
+
+  const setBlockConnectors = useCallback(
+    (blockConnectors: boolean) => {
+      privacyRef.current = { ...privacyRef.current, blockConnectors };
+      patch({ blockConnectors });
+    },
+    [patch],
+  );
+  const setScrubPii = useCallback(
+    (scrubPii: boolean) => {
+      privacyRef.current = { ...privacyRef.current, scrubPii };
+      patch({ scrubPii });
+    },
     [patch],
   );
 
@@ -207,9 +241,15 @@ export function useMeeting() {
     let cancelled = false;
     fetch("/api/connectors")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { targets?: ShareTarget[] } | null) => {
-        if (!cancelled && data?.targets) patch({ targets: data.targets });
-      })
+      .then(
+        (data: { targets?: ShareTarget[]; exportTargets?: Array<"notion" | "gdrive"> } | null) => {
+          if (cancelled || !data) return;
+          patch({
+            ...(data.targets ? { targets: data.targets } : {}),
+            ...(data.exportTargets ? { exportTargets: data.exportTargets } : {}),
+          });
+        },
+      )
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -264,6 +304,8 @@ export function useMeeting() {
     latestSummaryRef.current = null;
     lastSummarizedSegmentIdRef.current = null;
     lastSummarizedContextIdRef.current = 0;
+    // Privacy toggles are per-meeting: each meeting starts from the defaults.
+    privacyRef.current = { blockConnectors: false, scrubPii: false };
     // Speaker names are intentionally NOT reset — they persist across meetings.
     patch({
       status: "connecting",
@@ -278,6 +320,10 @@ export function useMeeting() {
       captionsActive: false,
       context: [],
       capturingFrame: false,
+      blockConnectors: false,
+      scrubPii: false,
+      exporting: false,
+      exportDetail: null,
     });
 
     try {
@@ -396,6 +442,7 @@ export function useMeeting() {
           // Watermarks → the server sends only the delta since the last summary.
           afterSegmentId: lastSummarizedSegmentIdRef.current ?? undefined,
           afterContextId: lastSummarizedContextIdRef.current,
+          scrubPii: privacyRef.current.scrubPii,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Summary failed");
@@ -447,6 +494,8 @@ export function useMeeting() {
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           speakerNames: speakerNamesRef.current,
+          blockConnectors: privacyRef.current.blockConnectors,
+          scrubPii: privacyRef.current.scrubPii,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Insights failed");
@@ -473,7 +522,13 @@ export function useMeeting() {
       const res = await fetch("/api/share", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ insight, target, destination }),
+        body: JSON.stringify({
+          insight,
+          target,
+          destination,
+          blockConnectors: privacyRef.current.blockConnectors,
+          scrubPii: privacyRef.current.scrubPii,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Share failed");
       return (await res.json()) as { ok: true };
@@ -512,7 +567,11 @@ export function useMeeting() {
       const res = await fetch("/api/frame", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionIdRef.current, image }),
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          image,
+          scrubPii: privacyRef.current.scrubPii,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Frame capture failed");
       const { item } = (await res.json()) as { item: ContextItem };
@@ -525,16 +584,67 @@ export function useMeeting() {
     }
   }, [patch]);
 
+  // Post-meeting export. "markdown" downloads locally (no API, works even with
+  // connectors held); "notion"/"gdrive" send the compiled markdown to /api/export.
+  const exportMeeting = useCallback(
+    async (target: ExportTarget) => {
+      const title = `Meeting notes — ${new Date().toLocaleString()}`;
+      const markdown = buildMeetingMarkdown({
+        title,
+        segments: state.segments,
+        context: state.context,
+        speakerNames: state.speakerNames,
+        summary: state.summary,
+        insights: state.insights,
+      });
+
+      if (target === "markdown") {
+        const blob = new Blob([markdown], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `neat-meet-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-")}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      patch({ exporting: true, exportDetail: null });
+      try {
+        const res = await fetch("/api/export", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            target,
+            title,
+            markdown,
+            blockConnectors: privacyRef.current.blockConnectors,
+            scrubPii: privacyRef.current.scrubPii,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error ?? "Export failed");
+        const { detail } = (await res.json()) as { detail?: string };
+        patch({ exporting: false, exportDetail: detail ?? "saved" });
+      } catch (err) {
+        patch({ exporting: false, error: (err as Error).message });
+      }
+    },
+    [state.segments, state.context, state.speakerNames, state.summary, state.insights, patch],
+  );
+
   return {
     state,
     setProfile,
     setAutoSummary,
     setSpeakerName,
+    setBlockConnectors,
+    setScrubPii,
     start,
     stop,
     refreshSummary,
     refreshInsights,
     share,
     captureFrame,
+    exportMeeting,
   };
 }
