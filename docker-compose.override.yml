@@ -1,16 +1,32 @@
 # Local-deployment override (this box only; additive so upstream syncs stay clean).
 #
-# This environment's egress policy gives container bridge networks no internet
-# access, while the host itself may talk directly to registry.npmjs.org. Building
-# on the host network lets the images' `npm ci` steps resolve and download
-# packages. Image pulls already go through the mirror.gcr.io registry mirror
-# configured in /etc/docker/daemon.json.
+# This environment's egress goes through an inspection proxy on the host's
+# loopback; container bridge networks have no egress at all. So images are
+# built on the host network, with the host's proxy settings passed through
+# (Docker's predefined proxy build args are not persisted into the images).
+# TLS trust for the proxy's CA comes from the optional ca-bundle.crt in each
+# build context (see the Dockerfiles). Image pulls already go through the
+# mirror.gcr.io registry mirror configured in /etc/docker/daemon.json.
 services:
   backend:
     build:
       context: ./backend
       network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${https_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
   frontend:
     build:
       context: ./frontend
       network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${https_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
