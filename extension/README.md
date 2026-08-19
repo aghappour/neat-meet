@@ -20,8 +20,15 @@ works exactly as before.
 5. Join your meeting at **meet.google.com** and click **Turn on captions (CC)** —
    nothing imports until Meet is actually showing captions.
 
+> **Reload any Meet tab that was already open.** Chrome only injects the content
+> script into tabs opened *after* the extension is loaded or updated, so a Meet
+> call you already had open won't import until you refresh it. When it's working
+> you'll see `[neat-meet] caption reader active` in the Meet tab's console
+> (DevTools → Console).
+
 In neat-meet, click **Start meeting** as usual. Speaker-named lines from Meet
-will appear in the transcript, and the summary/insights will use the real names.
+will appear in the transcript (with a **Meet captions** badge), and the
+summary/insights will use the real names.
 
 ## Configuration
 
