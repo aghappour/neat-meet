@@ -1,6 +1,0 @@
-# Local streaming transcription sidecar.
-# faster-whisper bundles the CTranslate2 backend; on Apple Silicon / GPU it will
-# use the accelerator automatically, otherwise it runs int8 on CPU.
-faster-whisper>=1.1.0
-websockets>=13.0
-numpy>=1.26

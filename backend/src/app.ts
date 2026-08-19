@@ -1,0 +1,221 @@
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { chatRouter } from "./routes/chat";
+import { wordChatRouter } from "./routes/wordChat";
+import { projectsRouter } from "./routes/projects";
+import { projectChatRouter } from "./routes/projectChat";
+import { documentsRouter } from "./routes/documents";
+import { libraryRouter } from "./routes/library";
+import { tabularRouter } from "./routes/tabular";
+import { workflowsRouter } from "./routes/workflows";
+import { quickActionsRouter } from "./routes/quickActions";
+import { workflowAddonsRouter } from "./routes/workflowAddons";
+import { userRouter } from "./routes/user";
+import { modelsRouter } from "./routes/models";
+import { downloadsRouter } from "./routes/downloads";
+import { sourceDocumentsRouter } from "./routes/sourceDocuments";
+import { auditRouter } from "./routes/audit";
+import { manifestPublicKey } from "./lib/manifestSigning";
+import { safeErrorLog } from "./lib/safeError";
+
+export const app = express();
+const isProduction = process.env.NODE_ENV === "production";
+
+// Ceiling for JSON API requests. File uploads use multipart handling and
+// are governed by separate upload limits.
+const JSON_BODY_LIMIT = "50mb";
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function minutes(value: number): number {
+  return value * 60 * 1000;
+}
+
+function hours(value: number): number {
+  return minutes(value * 60);
+}
+
+function makeLimiter(options: {
+  windowMs: number;
+  max: number;
+  message?: string;
+}) {
+  return rateLimit({
+    windowMs: options.windowMs,
+    max: options.max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.method === "OPTIONS",
+    message: {
+      detail: options.message ?? "Too many requests. Please try again later.",
+    },
+  });
+}
+
+const generalLimiter = makeLimiter({
+  windowMs: minutes(envInt("RATE_LIMIT_GENERAL_WINDOW_MINUTES", 15)),
+  max: envInt("RATE_LIMIT_GENERAL_MAX", 300),
+});
+
+const chatLimiter = makeLimiter({
+  windowMs: minutes(envInt("RATE_LIMIT_CHAT_WINDOW_MINUTES", 15)),
+  max: envInt("RATE_LIMIT_CHAT_MAX", 30),
+  message: "Too many chat requests. Please try again later.",
+});
+
+const chatCreateLimiter = makeLimiter({
+  windowMs: minutes(envInt("RATE_LIMIT_CHAT_CREATE_WINDOW_MINUTES", 15)),
+  max: envInt("RATE_LIMIT_CHAT_CREATE_MAX", 60),
+});
+
+const uploadLimiter = makeLimiter({
+  windowMs: hours(envInt("RATE_LIMIT_UPLOAD_WINDOW_HOURS", 1)),
+  max: envInt("RATE_LIMIT_UPLOAD_MAX", 50),
+  message: "Too many upload requests. Please try again later.",
+});
+
+const exportLimiter = makeLimiter({
+  windowMs: hours(envInt("RATE_LIMIT_EXPORT_WINDOW_HOURS", 1)),
+  max: envInt("RATE_LIMIT_EXPORT_MAX", 10),
+  message: "Too many export requests. Please try again later.",
+});
+
+const dataDeleteLimiter = makeLimiter({
+  windowMs: hours(envInt("RATE_LIMIT_DATA_DELETE_WINDOW_HOURS", 1)),
+  max: envInt("RATE_LIMIT_DATA_DELETE_MAX", 20),
+  message: "Too many data deletion requests. Please try again later.",
+});
+
+app.disable("x-powered-by");
+app.set("trust proxy", envInt("TRUST_PROXY_HOPS", 1));
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    hsts: isProduction
+      ? {
+          maxAge: 15552000,
+          includeSubDomains: true,
+        }
+      : false,
+    referrerPolicy: { policy: "no-referrer" },
+  }),
+);
+
+export function configuredAllowedOrigins(
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  return new Set(
+    [
+      env.FRONTEND_URL ?? "http://localhost:3000",
+      env.WORD_ADDIN_URL,
+      ...(env.ALLOWED_ORIGINS ?? "").split(","),
+    ]
+      .map((origin) => origin?.trim())
+      .filter((origin): origin is string => !!origin),
+  );
+}
+
+const allowedOrigins = configuredAllowedOrigins();
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow server-to-server requests (no Origin header) and any
+      // explicitly listed origin. A disallowed origin resolves to `false`
+      // (cors omits the Access-Control-Allow-Origin header and the browser
+      // blocks the response) rather than calling back with an Error —
+      // throwing here would propagate to Express's default handler and turn
+      // every disallowed cross-origin request, including preflight, into an
+      // HTTP 500.
+      callback(null, !origin || allowedOrigins.has(origin));
+    },
+    credentials: true,
+    allowedHeaders: ["Authorization", "Content-Type"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  }),
+);
+
+app.use(generalLimiter);
+
+app.post("/chat", chatLimiter);
+app.post("/word-chat", chatLimiter);
+app.post("/projects/:projectId/chat", chatLimiter);
+app.post("/tabular-review/:reviewId/chat", chatLimiter);
+app.post("/tabular-review/:reviewId/generate", chatLimiter);
+app.post("/chat/create", chatCreateLimiter);
+app.post("/chat/:chatId/generate-title", chatCreateLimiter);
+app.post("/single-documents", uploadLimiter);
+app.post("/library/:kind/documents", uploadLimiter);
+app.post("/single-documents/:documentId/versions", uploadLimiter);
+app.post("/workflows/:workflowId/reference-files", uploadLimiter);
+app.post("/workflow-addons/:addonId/import", uploadLimiter);
+app.put(
+  "/workflows/:workflowId/reference-files/:referenceId",
+  uploadLimiter,
+);
+app.put(
+  "/single-documents/:documentId/versions/:versionId/file",
+  uploadLimiter,
+);
+app.post("/projects/:projectId/documents", uploadLimiter);
+app.get("/projects/:projectId/export", exportLimiter);
+app.get("/user/export", exportLimiter);
+app.get("/user/chats/export", exportLimiter);
+app.get("/user/tabular-reviews/export", exportLimiter);
+app.get("/audit/export", exportLimiter);
+app.delete("/user/account", dataDeleteLimiter);
+app.delete("/user/chats", dataDeleteLimiter);
+app.delete("/user/projects", dataDeleteLimiter);
+app.delete("/user/tabular-reviews", dataDeleteLimiter);
+
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+app.use("/chat", chatRouter);
+app.use("/word-chat", wordChatRouter);
+app.use("/models", modelsRouter);
+app.use("/projects", projectsRouter);
+app.use("/projects/:projectId/chat", projectChatRouter);
+app.use("/single-documents", documentsRouter);
+app.use("/library", libraryRouter);
+app.use("/tabular-review", tabularRouter);
+app.use("/workflows", workflowsRouter);
+app.use("/quick-actions", quickActionsRouter);
+app.use("/workflow-addons", workflowAddonsRouter);
+app.use("/user", userRouter);
+app.use("/users", userRouter);
+app.use("/download", downloadsRouter);
+app.use("/documents", sourceDocumentsRouter);
+app.use("/audit", auditRouter);
+
+app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// The Ed25519 public key this deployment signs project export manifests with,
+// or null when no key is configured. Deliberately open: whoever checks a
+// manifest is usually outside the workspace, and they need to get the key from
+// the server rather than trust the copy inside the file they were handed.
+app.get("/manifest-signing-key", (_req, res) => {
+  try {
+    res.json(manifestPublicKey());
+  } catch (err) {
+    console.error("[manifest-signing-key] failed", safeErrorLog(err));
+    res.status(500).json({
+      detail: "Manifest signing key is misconfigured",
+    });
+  }
+});

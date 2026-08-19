@@ -1,35 +1,30 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+node_modules
+.next
+dist
+out
+build
+.open-next
 
-# next.js
-/.next/
-/out/
-next-env.d.ts
-
-# typescript build info
-*.tsbuildinfo
-
-# production
-/build
-
-# python sidecar
-whisper-sidecar/.venv/
-__pycache__/
-*.pyc
-
-# env & secrets
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+!.env.local.example
 
-# logs
 *.log
-npm-debug.log*
-
-# misc
+*.raw-llm-stream.json
+*.tsbuildinfo
+next-env.d.ts
 .DS_Store
-*.pem
-/coverage
-.vitest
+.vercel
+coverage
+
+# Playwright artifacts and the bootstrapped e2e session (contains auth tokens)
+test-results/
+playwright-report/
+e2e/.auth/
+
+# Local Supabase scaffold. Keep the shared project configuration reproducible,
+# while excluding CLI state and other generated local files.
+/supabase/
+backend/supabase/*
+!backend/supabase/config.toml
