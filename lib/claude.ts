@@ -26,7 +26,24 @@ export function getClient(): Anthropic {
   }
 }
 
+/** Model for insights (drives MCP connector tool use — keep a capable tier). */
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5";
+
+/**
+ * Model for the mechanical hot paths — rolling summary and slide extraction.
+ * Defaults to Haiku 4.5 ($1/$5 per MTok vs Sonnet 5's $3/$15): these tasks are
+ * routine condensation/OCR-shaped work where the cheap tier holds up. Set
+ * SUMMARY_MODEL=claude-sonnet-5 in .env if you'd rather trade cost for polish.
+ */
+export const SUMMARY_MODEL = process.env.SUMMARY_MODEL || "claude-haiku-4-5";
+
+/**
+ * `output_config.effort` is rejected (400) by Haiku-tier models — include it
+ * only for models that support it. Spread the result into request params.
+ */
+export function effortConfig(model: string): Record<string, unknown> {
+  return model.includes("haiku") ? {} : { output_config: { effort: "low" } };
+}
 
 // Token guard: cap how much transcript / context is sent per call so cost stays
 // bounded on long meetings. Roughly 4 chars ≈ 1 token, so 24k chars ≈ ~6k tokens.

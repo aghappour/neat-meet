@@ -95,6 +95,10 @@ See `.env.example`. Highlights:
   or manage no raw key and run `ant auth login` (the Anthropic CLI); the app resolves
   the OAuth profile automatically. If it isn't picked up, run
   `eval "$(ant auth print-credentials --env)"` before starting.
+- **Cost controls** — summaries run in *delta mode* (each refresh sends only what's
+  new plus the prior summary; silence costs nothing) on the cheap `SUMMARY_MODEL`
+  (Haiku 4.5 by default); insights use `CLAUDE_MODEL` (Sonnet). Per-call size is
+  bounded by `TRANSCRIPT_MAX_CHARS` / `CONTEXT_MAX_CHARS`.
 - `WHISPER_PROFILE=capable|modest` — model size / latency; also switchable in the
   UI. `capable` (large-v3, ~1s chunks) for Apple Silicon / GPU; `modest`
   (base, longer chunks) for lower-powered machines.

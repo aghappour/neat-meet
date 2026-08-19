@@ -49,6 +49,12 @@ they're tested), and where to go next.
   bounds per-call cost on long meetings by sending the most recent portion; the
   summary folds in its previous version so it stays cumulative even when older
   lines are trimmed. Trimmed runs show a "condensed" chip.
+- **Cost optimization** — the rolling summary runs in *delta mode*: after the
+  first call, each refresh sends only the previous summary + the new lines since
+  (watermarked by segment id), and skips the API entirely when nothing new was
+  said. The summary and slide-extraction paths default to Haiku 4.5
+  (`SUMMARY_MODEL`, ~3x cheaper than Sonnet); insights keep `CLAUDE_MODEL`
+  (Sonnet) for MCP tool use. Auto-refresh runs at 30s.
 - **One-click share** — push an insight to Slack / Notion / Gmail / Telegram
   (Gmail + Telegram fan out through Zapier).
 
@@ -75,7 +81,7 @@ they're tested), and where to go next.
 6. **The Meet extension** runs only on `meet.google.com`, reads only caption
    text, and sends only to `localhost`.
 
-### What the tests pin (`npm test` — 44 tests)
+### What the tests pin (`npm test` — 48 tests)
 - **`lib/privacy.test.ts`**
   - No connector is attached when none is configured; no share target offered.
   - An auth token is never sent unless explicitly set.

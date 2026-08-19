@@ -51,7 +51,7 @@ interface MeetingState {
 
 const WS_PATH = "/api/audio";
 /** How often the rolling summary re-runs while live (when there's new transcript). */
-const SUMMARY_REFRESH_MS = 20_000;
+const SUMMARY_REFRESH_MS = 30_000;
 /** localStorage key for speaker-name overrides, remembered across meetings. */
 const SPEAKER_NAMES_KEY = "neatmeet.speakerNames";
 
@@ -140,6 +140,10 @@ export function useMeeting() {
   // Latest summary, folded into the next summary call so it stays cumulative
   // even when the transcript is capped by the token guard.
   const latestSummaryRef = useRef<MeetingSummary | null>(null);
+  // Server watermarks for delta summaries: only lines/context after these ids
+  // are sent on the next call, keeping steady-state cost small and flat.
+  const lastSummarizedSegmentIdRef = useRef<number | null>(null);
+  const lastSummarizedContextIdRef = useRef<number>(0);
 
   const patch = useCallback((p: Partial<MeetingState>) => {
     setState((s) => ({ ...s, ...p }));
@@ -258,6 +262,8 @@ export function useMeeting() {
     // on segment id and blend two transcripts into one pane.
     lastSummarizedCountRef.current = 0;
     latestSummaryRef.current = null;
+    lastSummarizedSegmentIdRef.current = null;
+    lastSummarizedContextIdRef.current = 0;
     // Speaker names are intentionally NOT reset — they persist across meetings.
     patch({
       status: "connecting",
@@ -387,19 +393,31 @@ export function useMeeting() {
           sessionId: sessionIdRef.current,
           speakerNames: speakerNamesRef.current,
           previousSummary: latestSummaryRef.current ?? undefined,
+          // Watermarks → the server sends only the delta since the last summary.
+          afterSegmentId: lastSummarizedSegmentIdRef.current ?? undefined,
+          afterContextId: lastSummarizedContextIdRef.current,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Summary failed");
-      const { truncated, ...summary } = (await res.json()) as MeetingSummary & {
-        truncated?: boolean;
-      };
+      const { truncated, unchanged, lastSegmentId, lastContextId, ...summary } =
+        (await res.json()) as MeetingSummary & {
+          truncated?: boolean;
+          unchanged?: boolean;
+          lastSegmentId?: number;
+          lastContextId?: number;
+        };
       lastSummarizedCountRef.current = requestCount;
       latestSummaryRef.current = summary;
+      if (typeof lastSegmentId === "number") lastSummarizedSegmentIdRef.current = lastSegmentId;
+      if (typeof lastContextId === "number") lastSummarizedContextIdRef.current = lastContextId;
       setState((s) => ({
         ...s,
         summary,
         summarizing: false,
-        summaryHistory: [...s.summaryHistory, { at: Date.now(), summary, truncated }],
+        // An unchanged echo (nothing new since last time) isn't a new version.
+        summaryHistory: unchanged
+          ? s.summaryHistory
+          : [...s.summaryHistory, { at: Date.now(), summary, truncated }],
       }));
     } catch (err) {
       patch({ summarizing: false, error: (err as Error).message });

@@ -3,14 +3,17 @@ import {
   addSlideContext,
   cappedTranscript,
   clearSession,
+  contextSince,
   contextText,
   hasContent,
   isCaptionDriven,
+  lastSegmentId,
   recentTranscript,
   recordCaption,
   recordChat,
   recordSegment,
   setActiveSession,
+  transcriptSince,
   transcriptText,
 } from "@/lib/session-store";
 import type { RawSegment } from "@/lib/transcription/provider";
@@ -159,6 +162,48 @@ describe("session-store token guard", () => {
     const text = contextText("cap-t", 200);
     expect(text.startsWith("[…earlier shared context omitted…]")).toBe(true);
     expect(text).toContain("chat message 39");
+  });
+});
+
+describe("session-store delta summaries", () => {
+  afterEach(() => {
+    clearSession("dl");
+  });
+
+  it("returns only lines after the watermark, with the new watermark", () => {
+    recordSegment("dl", raw({ text: "first" }));
+    recordSegment("dl", raw({ text: "second" }));
+    const mark = lastSegmentId("dl");
+    recordSegment("dl", raw({ text: "third" }));
+    recordSegment("dl", raw({ speaker: "them", speakerName: "Sarah", text: "fourth" }));
+    const { text, lastId } = transcriptSince("dl", mark);
+    expect(text).toBe("Me: third\nSarah: fourth");
+    expect(lastId).toBe(lastSegmentId("dl"));
+  });
+
+  it("returns empty delta (watermark unchanged) when nothing is new", () => {
+    recordSegment("dl", raw({ text: "only line" }));
+    const mark = lastSegmentId("dl");
+    const { text, lastId } = transcriptSince("dl", mark);
+    expect(text).toBe("");
+    expect(lastId).toBe(mark);
+  });
+
+  it("applies name overrides in the delta", () => {
+    const mark = lastSegmentId("dl");
+    recordSegment("dl", raw({ text: "hello" }));
+    const { text } = transcriptSince("dl", mark, { me: "Ahmed" });
+    expect(text).toBe("Ahmed: hello");
+  });
+
+  it("contextSince returns only new context items", () => {
+    setActiveSession("dl");
+    recordChat({ author: "Sam", text: "old message" });
+    const mark = contextSince("dl", 0).lastId;
+    recordChat({ author: "Mia", text: "new message" });
+    const { text, lastId } = contextSince("dl", mark);
+    expect(text).toBe("[chat] Mia: new message");
+    expect(lastId).toBeGreaterThan(mark);
   });
 });
 

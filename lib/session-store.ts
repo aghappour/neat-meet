@@ -152,12 +152,7 @@ export function addSlideContext(sessionId: string, text: string): ContextItem {
 export function contextText(sessionId: string, maxChars?: number): string {
   const s = sessions.get(sessionId);
   if (!s || s.context.length === 0) return "";
-  const lines = s.context.map((c) => {
-    if (c.kind === "slide") return `[shared slide] ${c.text}`;
-    if (c.kind === "doc") return `[shared doc] ${c.author ? `${c.author}: ` : ""}${c.text}`;
-    return `[chat] ${c.author ?? "Someone"}: ${c.text}`;
-  });
-  let text = lines.join("\n");
+  let text = s.context.map(formatContextLine).join("\n");
   if (maxChars && text.length > maxChars) {
     text = `[…earlier shared context omitted…]\n${text.slice(text.length - maxChars)}`;
   }
@@ -175,6 +170,55 @@ export function transcriptText(sessionId: string, names?: SpeakerNames): string 
 export function recentTranscript(sessionId: string, maxChars = 4000, names?: SpeakerNames): string {
   const full = transcriptText(sessionId, names);
   return full.length <= maxChars ? full : full.slice(full.length - maxChars);
+}
+
+/**
+ * Only the transcript lines AFTER segment id `afterId` — the delta since the
+ * last summary. Paired with folding in the previous summary, this lets the
+ * rolling summary send a few new lines per call instead of the whole meeting.
+ * `lastId` is the newest segment covered (pass it back as the next `afterId`).
+ */
+export function transcriptSince(
+  sessionId: string,
+  afterId: number,
+  names?: SpeakerNames,
+): { text: string; lastId: number } {
+  const s = sessions.get(sessionId);
+  if (!s) return { text: "", lastId: afterId };
+  const fresh = s.segments.filter((seg) => seg.id > afterId);
+  if (fresh.length === 0) return { text: "", lastId: afterId };
+  return {
+    text: fresh.map((seg) => `${displayName(seg, names)}: ${seg.text}`).join("\n"),
+    lastId: fresh[fresh.length - 1].id,
+  };
+}
+
+/** The newest stored segment id (0 when empty) — the initial summary watermark. */
+export function lastSegmentId(sessionId: string): number {
+  const s = sessions.get(sessionId);
+  if (!s || s.segments.length === 0) return 0;
+  return s.segments[s.segments.length - 1].id;
+}
+
+/** Context items after id `afterId`, formatted for the prompt (delta twin of contextText). */
+export function contextSince(
+  sessionId: string,
+  afterId: number,
+): { text: string; lastId: number } {
+  const s = sessions.get(sessionId);
+  if (!s) return { text: "", lastId: afterId };
+  const fresh = s.context.filter((c) => c.id > afterId);
+  if (fresh.length === 0) return { text: "", lastId: afterId };
+  return {
+    text: fresh.map(formatContextLine).join("\n"),
+    lastId: fresh[fresh.length - 1].id,
+  };
+}
+
+function formatContextLine(c: ContextItem): string {
+  if (c.kind === "slide") return `[shared slide] ${c.text}`;
+  if (c.kind === "doc") return `[shared doc] ${c.author ? `${c.author}: ` : ""}${c.text}`;
+  return `[chat] ${c.author ?? "Someone"}: ${c.text}`;
 }
 
 /**

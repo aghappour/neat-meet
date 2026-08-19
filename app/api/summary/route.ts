@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
 import {
-  CLAUDE_MODEL,
   CONTEXT_MAX_CHARS,
+  SUMMARY_MODEL,
   TRANSCRIPT_MAX_CHARS,
+  effortConfig,
   extractJson,
   firstText,
   getClient,
 } from "@/lib/claude";
-import { cappedTranscript, contextText, hasContent, type SpeakerNames } from "@/lib/session-store";
+import {
+  cappedTranscript,
+  contextSince,
+  contextText,
+  hasContent,
+  lastSegmentId,
+  transcriptSince,
+  type SpeakerNames,
+} from "@/lib/session-store";
 import type { MeetingSummary } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -30,8 +39,11 @@ export async function POST(req: Request) {
   let sessionId: string;
   let speakerNames: SpeakerNames | undefined;
   let previousSummary: MeetingSummary | undefined;
+  let afterSegmentId: number | undefined;
+  let afterContextId: number | undefined;
   try {
-    ({ sessionId, speakerNames, previousSummary } = await req.json());
+    ({ sessionId, speakerNames, previousSummary, afterSegmentId, afterContextId } =
+      await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -40,36 +52,70 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No transcript yet" }, { status: 400 });
   }
 
-  // Token guard: cap the transcript to bound cost on long meetings. Cumulativeness
-  // survives because we fold in the previous summary — so older verbatim lines can
-  // drop off without losing the earlier meeting.
-  const { text: transcript, truncated } = cappedTranscript(
-    sessionId,
-    TRANSCRIPT_MAX_CHARS,
-    speakerNames,
-  );
-  const context = contextText(sessionId, CONTEXT_MAX_CHARS);
-  const prior =
-    previousSummary && typeof previousSummary === "object"
-      ? `Summary so far (JSON) — extend it, don't restart from scratch:\n${JSON.stringify(previousSummary)}\n\n`
-      : "";
+  // Delta mode (cost optimization): when the client has a previous summary and a
+  // watermark, send only the NEW lines since then plus that summary — a few
+  // hundred tokens per call instead of the whole meeting.
+  const delta =
+    previousSummary && typeof previousSummary === "object" && typeof afterSegmentId === "number";
+
+  let transcript: string;
+  let truncated = false;
+  let newLastSegmentId: number;
+  let context: string;
+  let newLastContextId = typeof afterContextId === "number" ? afterContextId : 0;
+
+  if (delta) {
+    const seg = transcriptSince(sessionId, afterSegmentId as number, speakerNames);
+    const ctx = contextSince(sessionId, newLastContextId);
+    transcript = seg.text;
+    newLastSegmentId = seg.lastId;
+    context = ctx.text;
+    newLastContextId = ctx.lastId;
+    // Nothing new at all → echo the previous summary without an API call.
+    // `unchanged` lets the client skip recording a duplicate history version.
+    if (!transcript && !context) {
+      return NextResponse.json({
+        ...(previousSummary as MeetingSummary),
+        truncated: false,
+        unchanged: true,
+        lastSegmentId: newLastSegmentId,
+        lastContextId: newLastContextId,
+      });
+    }
+  } else {
+    // First summary (or client without a watermark): capped full transcript.
+    const capped = cappedTranscript(sessionId, TRANSCRIPT_MAX_CHARS, speakerNames);
+    transcript = capped.text;
+    truncated = capped.truncated;
+    newLastSegmentId = lastSegmentId(sessionId);
+    context = contextText(sessionId, CONTEXT_MAX_CHARS);
+    newLastContextId = contextSince(sessionId, 0).lastId;
+  }
+
+  const prior = delta
+    ? `Summary so far (JSON) — extend it, don't restart from scratch:\n${JSON.stringify(previousSummary)}\n\n`
+    : "";
 
   try {
     const client = getClient();
     // SDK 0.68 doesn't type effort/output_config; pass through untyped.
     const params = {
-      model: CLAUDE_MODEL,
-      max_tokens: 1500,
+      model: SUMMARY_MODEL,
+      max_tokens: 1000,
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      output_config: { effort: "low" },
+      ...effortConfig(SUMMARY_MODEL),
       messages: [
         {
           role: "user",
           content:
             prior +
-            `${truncated ? "Recent transcript" : "Transcript so far"}:\n\n${transcript}\n` +
-            (context ? `\nShared in the meeting (chat / docs / slides):\n${context}\n` : "") +
-            `\n${prior ? "Produce the UPDATED cumulative summary covering the whole meeting." : "Summarize as instructed."}`,
+            (transcript
+              ? `${delta ? "New transcript since that summary" : truncated ? "Recent transcript" : "Transcript so far"}:\n\n${transcript}\n`
+              : "") +
+            (context
+              ? `\n${delta ? "Newly shared" : "Shared"} in the meeting (chat / docs / slides):\n${context}\n`
+              : "") +
+            `\n${delta ? "Produce the UPDATED cumulative summary covering the whole meeting." : "Summarize as instructed."}`,
         },
       ],
     };
@@ -82,6 +128,8 @@ export async function POST(req: Request) {
       openQuestions: summary.openQuestions ?? [],
       actionItems: summary.actionItems ?? [],
       truncated,
+      lastSegmentId: newLastSegmentId,
+      lastContextId: newLastContextId,
     });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

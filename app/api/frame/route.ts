@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLAUDE_MODEL, firstText, getClient } from "@/lib/claude";
+import { SUMMARY_MODEL, effortConfig, firstText, getClient } from "@/lib/claude";
 import { addSlideContext } from "@/lib/session-store";
 
 export const runtime = "nodejs";
@@ -35,9 +35,9 @@ export async function POST(req: Request) {
   try {
     const client = getClient();
     const params = {
-      model: CLAUDE_MODEL,
+      model: SUMMARY_MODEL,
       max_tokens: 700,
-      output_config: { effort: "low" },
+      ...effortConfig(SUMMARY_MODEL),
       messages: [
         {
           role: "user",
