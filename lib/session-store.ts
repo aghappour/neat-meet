@@ -149,7 +149,7 @@ export function addSlideContext(sessionId: string, text: string): ContextItem {
  * A prompt block summarizing non-spoken context (chat, shared docs, slides).
  * Empty string when there's nothing, so callers can append unconditionally.
  */
-export function contextText(sessionId: string): string {
+export function contextText(sessionId: string, maxChars?: number): string {
   const s = sessions.get(sessionId);
   if (!s || s.context.length === 0) return "";
   const lines = s.context.map((c) => {
@@ -157,7 +157,11 @@ export function contextText(sessionId: string): string {
     if (c.kind === "doc") return `[shared doc] ${c.author ? `${c.author}: ` : ""}${c.text}`;
     return `[chat] ${c.author ?? "Someone"}: ${c.text}`;
   });
-  return lines.join("\n");
+  let text = lines.join("\n");
+  if (maxChars && text.length > maxChars) {
+    text = `[…earlier shared context omitted…]\n${text.slice(text.length - maxChars)}`;
+  }
+  return text;
 }
 
 /** Full transcript as speaker-attributed lines, honoring name overrides. */
@@ -171,6 +175,25 @@ export function transcriptText(sessionId: string, names?: SpeakerNames): string 
 export function recentTranscript(sessionId: string, maxChars = 4000, names?: SpeakerNames): string {
   const full = transcriptText(sessionId, names);
   return full.length <= maxChars ? full : full.slice(full.length - maxChars);
+}
+
+/**
+ * The transcript, bounded to `maxChars` to keep per-call token cost predictable
+ * on long meetings. Keeps the most recent portion (aligned to a line boundary)
+ * and prepends a marker when anything was dropped. `truncated` lets callers note
+ * the trim in the UI.
+ */
+export function cappedTranscript(
+  sessionId: string,
+  maxChars: number,
+  names?: SpeakerNames,
+): { text: string; truncated: boolean } {
+  const full = transcriptText(sessionId, names);
+  if (full.length <= maxChars) return { text: full, truncated: false };
+  const tail = full.slice(full.length - maxChars);
+  const nl = tail.indexOf("\n");
+  const clean = nl >= 0 ? tail.slice(nl + 1) : tail; // don't start mid-line
+  return { text: `[…earlier transcript omitted to bound cost…]\n${clean}`, truncated: true };
 }
 
 export function hasContent(sessionId: string): boolean {

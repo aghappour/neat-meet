@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
-import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { contextText, hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
+import {
+  CLAUDE_MODEL,
+  CONTEXT_MAX_CHARS,
+  TRANSCRIPT_MAX_CHARS,
+  extractJson,
+  firstText,
+  getClient,
+} from "@/lib/claude";
+import { cappedTranscript, contextText, hasContent, type SpeakerNames } from "@/lib/session-store";
 import { enabledConnectors, mcpRequestFragments } from "@/lib/connectors";
 import type { Insight } from "@/lib/types";
 
@@ -33,9 +40,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No transcript yet" }, { status: 400 });
   }
 
-  // Full transcript → insights consider the whole meeting, not just a window.
-  const transcript = transcriptText(sessionId, speakerNames);
-  const context = contextText(sessionId);
+  // Whole meeting, but capped to bound cost on long meetings.
+  const { text: transcript, truncated } = cappedTranscript(
+    sessionId,
+    TRANSCRIPT_MAX_CHARS,
+    speakerNames,
+  );
+  const context = contextText(sessionId, CONTEXT_MAX_CHARS);
   const connectors = enabledConnectors();
 
   try {
@@ -68,6 +79,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       insights: Array.isArray(insights) ? insights.slice(0, 6) : [],
       grounded: connectors.map((c) => c.label),
+      truncated,
     });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   addSlideContext,
+  cappedTranscript,
   clearSession,
   contextText,
   hasContent,
@@ -122,6 +123,42 @@ describe("session-store context (chat / docs / slides)", () => {
     expect(hasContent("ctx1")).toBe(false);
     recordChat({ author: "Sam", text: "hello" });
     expect(hasContent("ctx1")).toBe(true);
+  });
+});
+
+describe("session-store token guard", () => {
+  afterEach(() => {
+    clearSession("cap-t");
+  });
+
+  it("returns the full transcript untrimmed when under the cap", () => {
+    recordSegment("cap-t", raw({ text: "short meeting" }));
+    const { text, truncated } = cappedTranscript("cap-t", 10_000);
+    expect(truncated).toBe(false);
+    expect(text).toBe("Me: short meeting");
+  });
+
+  it("caps to the tail with a marker, aligned to a line boundary", () => {
+    for (let i = 0; i < 60; i++) {
+      recordSegment("cap-t", raw({ text: `line number ${i} with some padding text` }));
+    }
+    const { text, truncated } = cappedTranscript("cap-t", 300);
+    expect(truncated).toBe(true);
+    expect(text.startsWith("[…earlier transcript omitted to bound cost…]\n")).toBe(true);
+    // The kept portion starts at a line boundary (a speaker prefix), keeps the
+    // newest line, and respects the cap (marker aside).
+    const body = text.split("\n").slice(1).join("\n");
+    expect(body.startsWith("Me: ")).toBe(true);
+    expect(body).toContain("line number 59");
+    expect(body.length).toBeLessThanOrEqual(300);
+  });
+
+  it("caps context with a marker too", () => {
+    setActiveSession("cap-t");
+    for (let i = 0; i < 40; i++) recordChat({ author: "Sam", text: `chat message ${i}` });
+    const text = contextText("cap-t", 200);
+    expect(text.startsWith("[…earlier shared context omitted…]")).toBe(true);
+    expect(text).toContain("chat message 39");
   });
 });
 

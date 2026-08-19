@@ -45,6 +45,10 @@ they're tested), and where to go next.
   browsable history.
 - **Cumulative** — both summary and insights consider the whole meeting so far,
   not just a trailing window.
+- **Token guard** — a configurable cap (`TRANSCRIPT_MAX_CHARS` / `CONTEXT_MAX_CHARS`)
+  bounds per-call cost on long meetings by sending the most recent portion; the
+  summary folds in its previous version so it stays cumulative even when older
+  lines are trimmed. Trimmed runs show a "condensed" chip.
 - **One-click share** — push an insight to Slack / Notion / Gmail / Telegram
   (Gmail + Telegram fan out through Zapier).
 
@@ -71,7 +75,7 @@ they're tested), and where to go next.
 6. **The Meet extension** runs only on `meet.google.com`, reads only caption
    text, and sends only to `localhost`.
 
-### What the tests pin (`npm test` — 41 tests)
+### What the tests pin (`npm test` — 44 tests)
 - **`lib/privacy.test.ts`**
   - No connector is attached when none is configured; no share target offered.
   - An auth token is never sent unless explicitly set.
@@ -107,8 +111,6 @@ they're tested), and where to go next.
   resolved vitest 2 — verify a clean `npm ci` installs the intended versions.
 
 ### P2 — product
-- **Token/cost guard** for long meetings: cumulative prompts grow unbounded —
-  fold older transcript into a running digest, or cap with a visible note.
 - **Post-meeting export** — save transcript + final summary + insights to
   Notion / Drive / a markdown file in one click.
 - **Redaction controls** — a per-meeting "don't send to connectors" toggle and

@@ -28,6 +28,13 @@ export function getClient(): Anthropic {
 
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5";
 
+// Token guard: cap how much transcript / context is sent per call so cost stays
+// bounded on long meetings. Roughly 4 chars ≈ 1 token, so 24k chars ≈ ~6k tokens.
+// The summary additionally folds in the previous summary, so trimming old
+// verbatim lines doesn't lose the earlier meeting — see app/api/summary/route.ts.
+export const TRANSCRIPT_MAX_CHARS = Number(process.env.TRANSCRIPT_MAX_CHARS || 24000);
+export const CONTEXT_MAX_CHARS = Number(process.env.CONTEXT_MAX_CHARS || 4000);
+
 /** Extract the first well-formed JSON value from a model response. */
 export function extractJson<T>(text: string): T {
   // Strip ```json fences if present.

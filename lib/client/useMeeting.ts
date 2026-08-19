@@ -137,6 +137,9 @@ export function useMeeting() {
   const lastSummarizedCountRef = useRef(0);
   // Latest speaker-name overrides, mirrored for the stable refresh callbacks.
   const speakerNamesRef = useRef<Record<string, string>>({});
+  // Latest summary, folded into the next summary call so it stays cumulative
+  // even when the transcript is capped by the token guard.
+  const latestSummaryRef = useRef<MeetingSummary | null>(null);
 
   const patch = useCallback((p: Partial<MeetingState>) => {
     setState((s) => ({ ...s, ...p }));
@@ -254,6 +257,7 @@ export function useMeeting() {
     // per session — so carrying the previous meeting's state over would collide
     // on segment id and blend two transcripts into one pane.
     lastSummarizedCountRef.current = 0;
+    latestSummaryRef.current = null;
     // Speaker names are intentionally NOT reset — they persist across meetings.
     patch({
       status: "connecting",
@@ -382,16 +386,20 @@ export function useMeeting() {
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           speakerNames: speakerNamesRef.current,
+          previousSummary: latestSummaryRef.current ?? undefined,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Summary failed");
-      const summary = (await res.json()) as MeetingSummary;
+      const { truncated, ...summary } = (await res.json()) as MeetingSummary & {
+        truncated?: boolean;
+      };
       lastSummarizedCountRef.current = requestCount;
+      latestSummaryRef.current = summary;
       setState((s) => ({
         ...s,
         summary,
         summarizing: false,
-        summaryHistory: [...s.summaryHistory, { at: Date.now(), summary }],
+        summaryHistory: [...s.summaryHistory, { at: Date.now(), summary, truncated }],
       }));
     } catch (err) {
       patch({ summarizing: false, error: (err as Error).message });
@@ -424,9 +432,10 @@ export function useMeeting() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Insights failed");
-      const { insights, grounded } = (await res.json()) as {
+      const { insights, grounded, truncated } = (await res.json()) as {
         insights: Insight[];
         grounded?: string[];
+        truncated?: boolean;
       };
       const g = grounded ?? [];
       setState((s) => ({
@@ -434,7 +443,7 @@ export function useMeeting() {
         insights,
         grounded: g,
         insightsLoading: false,
-        insightHistory: [...s.insightHistory, { at: Date.now(), insights, grounded: g }],
+        insightHistory: [...s.insightHistory, { at: Date.now(), insights, grounded: g, truncated }],
       }));
     } catch (err) {
       patch({ insightsLoading: false, error: (err as Error).message });

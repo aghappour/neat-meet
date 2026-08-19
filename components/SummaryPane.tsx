@@ -45,7 +45,17 @@ export function SummaryPane({
   return (
     <section className="flex h-full flex-col rounded-xl border border-edge bg-panel">
       <header className="flex items-center justify-between border-b border-edge px-4 py-3">
-        <span className="text-sm font-semibold text-slate-200">Rolling summary</span>
+        <span className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-200">Rolling summary</span>
+          {current?.truncated && (
+            <span
+              title="Transcript was capped to limit cost; the earlier meeting is carried via the prior summary."
+              className="rounded-full border border-edge px-2 py-0.5 text-[10px] text-muted"
+            >
+              condensed
+            </span>
+          )}
+        </span>
         <div className="flex items-center gap-2">
           <label
             className="flex cursor-pointer items-center gap-1 text-xs text-muted"

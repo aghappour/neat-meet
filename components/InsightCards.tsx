@@ -118,6 +118,14 @@ export function InsightCards({
               {grounded.length > 0 ? `grounded in ${grounded.join(", ")}` : "from transcript only"}
             </span>
           )}
+          {current?.truncated && (
+            <span
+              title="Transcript was capped to limit cost on this run."
+              className="rounded-full border border-edge px-2 py-0.5 text-[10px] text-muted"
+            >
+              condensed
+            </span>
+          )}
         </span>
         <button
           onClick={onRefresh}

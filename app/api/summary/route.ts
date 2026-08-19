@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
-import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { contextText, hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
+import {
+  CLAUDE_MODEL,
+  CONTEXT_MAX_CHARS,
+  TRANSCRIPT_MAX_CHARS,
+  extractJson,
+  firstText,
+  getClient,
+} from "@/lib/claude";
+import { cappedTranscript, contextText, hasContent, type SpeakerNames } from "@/lib/session-store";
 import type { MeetingSummary } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,8 +29,9 @@ Rules: be concise and factual; include only what the transcript supports; use []
 export async function POST(req: Request) {
   let sessionId: string;
   let speakerNames: SpeakerNames | undefined;
+  let previousSummary: MeetingSummary | undefined;
   try {
-    ({ sessionId, speakerNames } = await req.json());
+    ({ sessionId, speakerNames, previousSummary } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -32,9 +40,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No transcript yet" }, { status: 400 });
   }
 
-  // Full transcript each time → the summary is cumulative over the whole meeting.
-  const transcript = transcriptText(sessionId, speakerNames);
-  const context = contextText(sessionId);
+  // Token guard: cap the transcript to bound cost on long meetings. Cumulativeness
+  // survives because we fold in the previous summary — so older verbatim lines can
+  // drop off without losing the earlier meeting.
+  const { text: transcript, truncated } = cappedTranscript(
+    sessionId,
+    TRANSCRIPT_MAX_CHARS,
+    speakerNames,
+  );
+  const context = contextText(sessionId, CONTEXT_MAX_CHARS);
+  const prior =
+    previousSummary && typeof previousSummary === "object"
+      ? `Summary so far (JSON) — extend it, don't restart from scratch:\n${JSON.stringify(previousSummary)}\n\n`
+      : "";
 
   try {
     const client = getClient();
@@ -48,21 +66,23 @@ export async function POST(req: Request) {
         {
           role: "user",
           content:
-            `Transcript so far:\n\n${transcript}\n` +
+            prior +
+            `${truncated ? "Recent transcript" : "Transcript so far"}:\n\n${transcript}\n` +
             (context ? `\nShared in the meeting (chat / docs / slides):\n${context}\n` : "") +
-            `\nSummarize as instructed.`,
+            `\n${prior ? "Produce the UPDATED cumulative summary covering the whole meeting." : "Summarize as instructed."}`,
         },
       ],
     };
     const res = await client.messages.create(params as never);
     const summary = extractJson<MeetingSummary>(firstText(res.content as never));
-    // Normalize to guard against missing arrays.
+    // Normalize to guard against missing arrays; `truncated` lets the UI note the trim.
     return NextResponse.json({
       gist: summary.gist ?? "",
       decisions: summary.decisions ?? [],
       openQuestions: summary.openQuestions ?? [],
       actionItems: summary.actionItems ?? [],
-    } satisfies MeetingSummary);
+      truncated,
+    });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

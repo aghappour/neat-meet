@@ -103,6 +103,8 @@ export type ShareTarget = "slack" | "notion" | "gmail" | "telegram";
 export interface SummaryVersion {
   at: number;
   summary: MeetingSummary;
+  /** True when the transcript was capped for this run (token guard). */
+  truncated?: boolean;
 }
 
 /** One timestamped insights generation, retained for the history view. */
@@ -110,4 +112,6 @@ export interface InsightsVersion {
   at: number;
   insights: Insight[];
   grounded: string[];
+  /** True when the transcript was capped for this run (token guard). */
+  truncated?: boolean;
 }
