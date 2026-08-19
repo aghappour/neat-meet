@@ -32,11 +32,13 @@ function SpeakerChip({
   identity,
   name,
   color,
+  roster,
   onRename,
 }: {
   identity: string;
   name: string;
   color: string;
+  roster: string[];
   onRename: (identity: string, name: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -48,18 +50,26 @@ function SpeakerChip({
       setEditing(false);
     };
     return (
-      <input
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-        placeholder={name}
-        className="w-28 rounded-full border border-edge bg-ink px-2 py-0.5 text-xs text-slate-100"
-      />
+      <>
+        <input
+          autoFocus
+          list="neatmeet-roster"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          placeholder={name}
+          className="w-28 rounded-full border border-edge bg-ink px-2 py-0.5 text-xs text-slate-100"
+        />
+        <datalist id="neatmeet-roster">
+          {roster.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+      </>
     );
   }
 
@@ -82,12 +92,14 @@ export function TranscriptPane({
   segments,
   interims,
   speakerNames,
+  roster,
   onRename,
   captionsActive,
 }: {
   segments: TranscriptSegment[];
   interims: Record<string, TranscriptSegment | undefined>;
   speakerNames: Names;
+  roster: string[];
   onRename: (identity: string, name: string) => void;
   captionsActive: boolean;
 }) {
@@ -129,6 +141,7 @@ export function TranscriptPane({
               identity={identity}
               name={resolveName(seg, speakerNames)}
               color={colorFor(seg)}
+              roster={roster}
               onRename={onRename}
             />
           ))}

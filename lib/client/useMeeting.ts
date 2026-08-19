@@ -38,6 +38,8 @@ interface MeetingState {
   profile: WhisperProfile;
   /** User (or Meet) overrides of speaker display names, keyed by identity. */
   speakerNames: Record<string, string>;
+  /** Every name ever assigned, remembered for quick-pick when renaming. */
+  roster: string[];
   /** True once Google Meet captions (via the extension) are driving the transcript. */
   captionsActive: boolean;
 }
@@ -68,6 +70,29 @@ function saveSpeakerNames(names: Record<string, string>): void {
   }
 }
 
+/** localStorage key for the roster — every name ever assigned, for quick-pick. */
+const ROSTER_KEY = "neatmeet.roster";
+
+function loadRoster(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(ROSTER_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRoster(roster: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useMeeting() {
   const [state, setState] = useState<MeetingState>({
     status: "idle",
@@ -83,6 +108,7 @@ export function useMeeting() {
     grounded: [],
     insightHistory: [],
     speakerNames: {},
+    roster: [],
     captionsActive: false,
     targets: [],
     // Default to the profile that keeps up on a CPU-only machine — `capable`
@@ -124,7 +150,13 @@ export function useMeeting() {
         else delete next[identity];
         speakerNamesRef.current = next;
         saveSpeakerNames(next); // remember across meetings
-        return { ...s, speakerNames: next };
+        // Grow the roster with any newly-seen name, for quick-pick next time.
+        let roster = s.roster;
+        if (trimmed && !roster.includes(trimmed)) {
+          roster = [...roster, trimmed];
+          saveRoster(roster);
+        }
+        return { ...s, speakerNames: next, roster };
       });
     },
     [],
@@ -134,10 +166,14 @@ export function useMeeting() {
   // can't cause an SSR hydration mismatch).
   useEffect(() => {
     const saved = loadSpeakerNames();
+    const roster = loadRoster();
+    const p: Partial<MeetingState> = {};
     if (Object.keys(saved).length > 0) {
       speakerNamesRef.current = saved;
-      patch({ speakerNames: saved });
+      p.speakerNames = saved;
     }
+    if (roster.length > 0) p.roster = roster;
+    if (Object.keys(p).length > 0) patch(p);
   }, [patch]);
 
   // Keep the interval's refs in step with render state (see the interval below).

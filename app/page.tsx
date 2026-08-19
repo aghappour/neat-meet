@@ -95,6 +95,7 @@ export default function Page() {
             segments={state.segments}
             interims={state.interims}
             speakerNames={state.speakerNames}
+            roster={state.roster}
             onRename={setSpeakerName}
             captionsActive={state.captionsActive}
           />
