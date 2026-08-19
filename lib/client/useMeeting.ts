@@ -45,6 +45,28 @@ interface MeetingState {
 const WS_PATH = "/api/audio";
 /** How often the rolling summary re-runs while live (when there's new transcript). */
 const SUMMARY_REFRESH_MS = 20_000;
+/** localStorage key for speaker-name overrides, remembered across meetings. */
+const SPEAKER_NAMES_KEY = "neatmeet.speakerNames";
+
+function loadSpeakerNames(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(SPEAKER_NAMES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSpeakerNames(names: Record<string, string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+  } catch {
+    /* storage full or unavailable — names just won't persist */
+  }
+}
 
 export function useMeeting() {
   const [state, setState] = useState<MeetingState>({
@@ -101,11 +123,22 @@ export function useMeeting() {
         if (trimmed) next[identity] = trimmed;
         else delete next[identity];
         speakerNamesRef.current = next;
+        saveSpeakerNames(next); // remember across meetings
         return { ...s, speakerNames: next };
       });
     },
     [],
   );
+
+  // Restore remembered speaker names once, after mount (client-only, so it
+  // can't cause an SSR hydration mismatch).
+  useEffect(() => {
+    const saved = loadSpeakerNames();
+    if (Object.keys(saved).length > 0) {
+      speakerNamesRef.current = saved;
+      patch({ speakerNames: saved });
+    }
+  }, [patch]);
 
   // Keep the interval's refs in step with render state (see the interval below).
   useEffect(() => {
@@ -172,7 +205,7 @@ export function useMeeting() {
     // per session — so carrying the previous meeting's state over would collide
     // on segment id and blend two transcripts into one pane.
     lastSummarizedCountRef.current = 0;
-    speakerNamesRef.current = {};
+    // Speaker names are intentionally NOT reset — they persist across meetings.
     patch({
       status: "connecting",
       error: null,
@@ -183,7 +216,6 @@ export function useMeeting() {
       insights: [],
       grounded: [],
       insightHistory: [],
-      speakerNames: {},
       captionsActive: false,
     });
 
