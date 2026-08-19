@@ -71,14 +71,20 @@ Whisper sidecar automatically.
   kept — step through them with **◀ / ▶**.
 - **Insights** — **Generate** grounds talking points in your connected tools; like
   the summary they consider the full meeting and keep a browsable history.
+- **Shared context** — the meeting **chat** and **shared links** (via the Meet
+  extension) appear inline in the transcript timeline and feed the summary/insights.
+- **Capture slide** — while live, click **📷 Capture slide** to send the current
+  shared frame (e.g. a deck) to Claude, which extracts its content into the
+  meeting context. Opt-in per capture — see Privacy.
 
 ### Google Meet speaker names
 
 neat-meet only receives the meeting tab's *audio*, so on its own it labels the far
-end "Participant." To get **real per-person names**, load the companion Chrome
-extension in [`extension/`](extension/) and turn on Meet's live captions — it reads
-Meet's speaker-attributed captions and streams them in. While captions are flowing
-they become the transcript source and local Whisper is paused (no double
+end "Participant." To get **real per-person names** — plus the **chat and shared
+links** — load the companion Chrome extension in [`extension/`](extension/), turn
+on Meet's live captions, and open the chat panel. It reads Meet's
+speaker-attributed captions and chat and streams them in. While captions are
+flowing they become the transcript source and local Whisper is paused (no double
 transcription). See [`extension/README.md`](extension/README.md) to install.
 
 ## Configuration
@@ -138,5 +144,11 @@ locally — a possible future add-on, not part of this build.
 ## Privacy
 
 Audio never leaves your machine — it's transcribed locally by Whisper. Only the
-resulting transcript text is sent to Claude (for summary/insights) and to the
-connectors you explicitly configure. Sessions are in-memory and ephemeral.
+resulting transcript text (plus chat/links you receive via the extension) is sent
+to Claude for summary/insights, and to the connectors you explicitly configure.
+Sessions are in-memory and ephemeral.
+
+**One deliberate exception — Capture slide.** When (and only when) you click
+**📷 Capture slide**, that single video frame is sent to Claude to extract its
+content. It's never automatic and no frame is stored. If you never click it, no
+image ever leaves your machine.

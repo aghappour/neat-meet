@@ -28,6 +28,14 @@ they're tested), and where to go next.
   flow they become the transcript source and local Whisper is suppressed (no
   double transcription). Shown with a "Meet captions" badge.
 
+### Shared context (non-spoken)
+- **Meeting chat & shared links** — the Meet extension also reads the chat panel;
+  messages appear in the transcript timeline and links are tagged as shared
+  documents. All of it feeds the summary/insight prompts.
+- **Capture slide (video frame → context)** — while live, one click sends the
+  current shared frame to Claude, which extracts its content (title, bullets,
+  figures) into the meeting context. Opt-in per capture; see Privacy.
+
 ### Intelligence
 - **Rolling summary** — Claude returns gist / decisions / open questions /
   action items. Auto-refreshes on an interval while live (only when there's new
@@ -50,7 +58,10 @@ they're tested), and where to go next.
 ### Guarantees
 1. **Audio never leaves the machine.** It's transcribed locally by Whisper; only
    the resulting *text* is sent onward.
-2. **Only transcript text goes to Claude** (for summary/insights).
+2. **Only text goes to Claude** (transcript + chat/links) — **with one opt-in
+   exception:** clicking **Capture slide** sends that single video frame to
+   Claude to extract its content. Never automatic; no frame is stored. Skip the
+   button and no image ever leaves the machine.
 3. **Connectors are opt-in.** A service is contacted only if you set its
    `*_MCP_URL`; a token is sent only if you set `*_MCP_TOKEN`.
 4. **Sessions are ephemeral and in-memory**, isolated per meeting, and can be
@@ -60,7 +71,7 @@ they're tested), and where to go next.
 6. **The Meet extension** runs only on `meet.google.com`, reads only caption
    text, and sends only to `localhost`.
 
-### What the tests pin (`npm test` — 36 tests)
+### What the tests pin (`npm test` — 41 tests)
 - **`lib/privacy.test.ts`**
   - No connector is attached when none is configured; no share target offered.
   - An auth token is never sent unless explicitly set.
@@ -73,7 +84,8 @@ they're tested), and where to go next.
   - Clearing a session leaves no residue.
 - **`lib/connectors.test.ts`** — enabled-if-configured, token-optional, target routing.
 - **`lib/session-store.test.ts`** — id assignment, finals-only retention, name
-  overrides, caption routing to the active session.
+  overrides, caption routing, and context (chat → chat/doc, slide extraction,
+  context-as-content).
 - **`lib/claude.test.ts`** — client resolution + tolerant JSON parsing.
 
 ### Honest gaps (not yet automated)

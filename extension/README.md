@@ -1,10 +1,16 @@
 # neat-meet — Google Meet captions extension
 
 A tiny companion Chrome extension that reads **Google Meet's live captions**
-(which already include each speaker's name) and streams them to your local
-neat-meet app. This is how neat-meet gets **real speaker names** during a Meet
-call — the app itself only receives the meeting tab's audio, not its DOM, so it
-can't see who's speaking on its own.
+(which already include each speaker's name) **and the chat panel**, and streams
+them to your local neat-meet app. This is how neat-meet gets **real speaker
+names** and **the meeting chat / shared links** during a Meet call — the app
+itself only receives the meeting tab's audio, not its DOM, so it can't see who's
+speaking or what's typed on its own.
+
+- **Captions** → speaker-attributed transcript. Turn on **captions (CC)**.
+- **Chat** → chat messages and any shared links appear in neat-meet's timeline
+  (links are tagged as shared documents). **Open the chat panel** ("Chat with
+  everyone") so the messages are in the DOM to read.
 
 While captions are flowing, neat-meet uses them as the transcript source and
 suppresses the local Whisper transcription for that session (so words aren't

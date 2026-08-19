@@ -43,10 +43,10 @@ function flush() {
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (!msg || msg.type !== "caption") return;
+  if (!msg || (msg.type !== "caption" && msg.type !== "chat")) return;
   // Cap the backlog so a long offline stretch can't grow unbounded.
   if (queue.length > 500) queue.shift();
-  queue.push({ type: "caption", ...msg.payload });
+  queue.push({ type: msg.type, ...msg.payload });
   connect();
   flush();
 });

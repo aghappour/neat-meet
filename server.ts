@@ -17,6 +17,7 @@ import { createProvider, type TranscriptionProvider } from "./lib/transcription/
 import {
   recordSegment,
   recordCaption,
+  recordChat,
   setActiveSession,
   isCaptionDriven,
 } from "./lib/session-store";
@@ -174,6 +175,10 @@ app.prepare().then(() => {
           interim: msg.interim,
         });
         if (recorded) broadcast(recorded.sessionId, { type: "segment", segment: recorded.segment });
+      } else if (msg.type === "chat") {
+        // From the Meet extension: a chat message / shared link.
+        const recorded = recordChat({ author: msg.author, text: msg.text, url: msg.url });
+        if (recorded) broadcast(recorded.sessionId, { type: "context", item: recorded.item });
       } else if (msg.type === "stop") {
         provider?.stop();
         provider = null;

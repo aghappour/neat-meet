@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
+import { contextText, hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
 import type { MeetingSummary } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,6 +34,7 @@ export async function POST(req: Request) {
 
   // Full transcript each time → the summary is cumulative over the whole meeting.
   const transcript = transcriptText(sessionId, speakerNames);
+  const context = contextText(sessionId);
 
   try {
     const client = getClient();
@@ -44,7 +45,13 @@ export async function POST(req: Request) {
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       output_config: { effort: "low" },
       messages: [
-        { role: "user", content: `Transcript so far:\n\n${transcript}\n\nSummarize as instructed.` },
+        {
+          role: "user",
+          content:
+            `Transcript so far:\n\n${transcript}\n` +
+            (context ? `\nShared in the meeting (chat / docs / slides):\n${context}\n` : "") +
+            `\nSummarize as instructed.`,
+        },
       ],
     };
     const res = await client.messages.create(params as never);

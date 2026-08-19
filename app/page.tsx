@@ -24,6 +24,7 @@ export default function Page() {
     refreshSummary,
     refreshInsights,
     share,
+    captureFrame,
   } = useMeeting();
   const live = state.status === "live";
   const notStarted = state.status === "idle" || state.status === "error";
@@ -65,6 +66,17 @@ export default function Page() {
             </select>
           </label>
 
+          {live && (
+            <button
+              onClick={captureFrame}
+              disabled={state.capturingFrame}
+              title="Send the current shared frame (e.g. a slide) to Claude to add its content to the meeting context"
+              className="rounded-md border border-edge px-3 py-1.5 text-sm text-slate-200 hover:bg-edge disabled:opacity-40"
+            >
+              {state.capturingFrame ? "Capturing…" : "📷 Capture slide"}
+            </button>
+          )}
+
           {notStarted ? (
             <button
               onClick={start}
@@ -94,6 +106,7 @@ export default function Page() {
           <TranscriptPane
             segments={state.segments}
             interims={state.interims}
+            context={state.context}
             speakerNames={state.speakerNames}
             roster={state.roster}
             onRename={setSpeakerName}

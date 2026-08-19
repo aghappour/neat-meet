@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
+import { contextText, hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
 import { enabledConnectors, mcpRequestFragments } from "@/lib/connectors";
 import type { Insight } from "@/lib/types";
 
@@ -35,6 +35,7 @@ export async function POST(req: Request) {
 
   // Full transcript → insights consider the whole meeting, not just a window.
   const transcript = transcriptText(sessionId, speakerNames);
+  const context = contextText(sessionId);
   const connectors = enabledConnectors();
 
   try {
@@ -47,7 +48,10 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: `Meeting so far:\n\n${transcript}\n\nSurface sharable insights as instructed.`,
+          content:
+            `Meeting so far:\n\n${transcript}\n` +
+            (context ? `\nShared in the meeting (chat / docs / slides):\n${context}\n` : "") +
+            `\nSurface sharable insights as instructed.`,
         },
       ],
     };

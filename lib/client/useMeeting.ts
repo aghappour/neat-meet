@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  ContextItem,
   Insight,
   InsightsVersion,
   MeetingSummary,
@@ -42,6 +43,10 @@ interface MeetingState {
   roster: string[];
   /** True once Google Meet captions (via the extension) are driving the transcript. */
   captionsActive: boolean;
+  /** Non-spoken context: chat, shared docs, captured slides. */
+  context: ContextItem[];
+  /** True while a captured video frame is being sent to Claude for extraction. */
+  capturingFrame: boolean;
 }
 
 const WS_PATH = "/api/audio";
@@ -110,6 +115,8 @@ export function useMeeting() {
     speakerNames: {},
     roster: [],
     captionsActive: false,
+    context: [],
+    capturingFrame: false,
     targets: [],
     // Default to the profile that keeps up on a CPU-only machine — `capable`
     // needs a CUDA GPU to hit its latency target.
@@ -120,6 +127,8 @@ export function useMeeting() {
   const ctxRef = useRef<AudioContext | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
   const sessionIdRef = useRef<string>("");
+  // The tab's display stream, kept (video track alive) so we can grab a frame.
+  const displayStreamRef = useRef<MediaStream | null>(null);
   // Refs the auto-refresh interval reads without re-subscribing each tick:
   // current final-segment count, whether a summary is already in flight, and
   // the count captured at the last summary request (to skip when nothing new).
@@ -207,6 +216,7 @@ export function useMeeting() {
       for (const track of stream.getTracks()) track.stop();
     }
     streamsRef.current = [];
+    displayStreamRef.current = null;
     ctxRef.current?.close().catch(() => {});
     ctxRef.current = null;
   }, []);
@@ -230,6 +240,9 @@ export function useMeeting() {
         delete interims[interimKey];
         return { ...s, captionsActive: captions, segments: [...s.segments, seg], interims };
       });
+    } else if (msg.type === "context") {
+      const item = msg.item;
+      setState((s) => ({ ...s, context: [...s.context, item] }));
     } else if (msg.type === "error") {
       patch({ status: "error", error: msg.message });
     }
@@ -253,6 +266,8 @@ export function useMeeting() {
       grounded: [],
       insightHistory: [],
       captionsActive: false,
+      context: [],
+      capturingFrame: false,
     });
 
     try {
@@ -264,8 +279,9 @@ export function useMeeting() {
         video: true, // Chrome requires a video track to be offered tab audio
         audio: true,
       });
-      // We only want the tab's audio; drop the video track.
-      for (const v of display.getVideoTracks()) v.stop();
+      // Keep the video track alive so "Capture slide" can grab a frame on
+      // demand; we still only wire the audio into transcription.
+      displayStreamRef.current = display;
       if (display.getAudioTracks().length === 0) {
         cleanup();
         patch({
@@ -438,6 +454,50 @@ export function useMeeting() {
     [],
   );
 
+  // Grab the current frame of the shared tab and send it to Claude to extract
+  // its content (e.g. a slide) into the meeting context. Opt-in per capture —
+  // this is the one path where an image (not just text) leaves the machine.
+  const captureFrame = useCallback(async () => {
+    const stream = displayStreamRef.current;
+    const track = stream?.getVideoTracks()[0];
+    if (!stream || !track || !sessionIdRef.current) {
+      patch({ error: "No shared video to capture — start a meeting and share the tab first." });
+      return;
+    }
+    patch({ capturingFrame: true });
+    const video = document.createElement("video");
+    try {
+      video.srcObject = new MediaStream([track]);
+      video.muted = true;
+      video.playsInline = true;
+      await video.play();
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 720;
+      const scale = Math.min(1, 1280 / Math.max(vw, vh)); // cap size → fewer image tokens
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(vw * scale);
+      canvas.height = Math.round(vh * scale);
+      const g = canvas.getContext("2d");
+      if (!g) throw new Error("Canvas unavailable");
+      g.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = canvas.toDataURL("image/jpeg", 0.7);
+      const res = await fetch("/api/frame", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionIdRef.current, image }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Frame capture failed");
+      const { item } = (await res.json()) as { item: ContextItem };
+      setState((s) => ({ ...s, capturingFrame: false, context: [...s.context, item] }));
+    } catch (err) {
+      patch({ capturingFrame: false, error: (err as Error).message });
+    } finally {
+      video.pause();
+      video.srcObject = null;
+    }
+  }, [patch]);
+
   return {
     state,
     setProfile,
@@ -448,5 +508,6 @@ export function useMeeting() {
     refreshSummary,
     refreshInsights,
     share,
+    captureFrame,
   };
 }

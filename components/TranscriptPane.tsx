@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { TranscriptSegment } from "@/lib/types";
+import type { ContextItem, TranscriptSegment } from "@/lib/types";
 
 type Names = Record<string, string>;
 
@@ -88,9 +88,41 @@ function SpeakerChip({
   );
 }
 
+function ContextRow({ item }: { item: ContextItem }) {
+  if (item.kind === "slide") {
+    return (
+      <div className="rounded-lg border border-amber-400/30 bg-amber-400/5 p-2">
+        <div className="mb-1 text-xs font-semibold text-amber-300">🖼️ Shared slide</div>
+        <p className="whitespace-pre-wrap text-sm text-slate-200">{item.text}</p>
+      </div>
+    );
+  }
+  if (item.kind === "doc") {
+    return (
+      <p className="text-sm">
+        <span className="text-muted">📎 {item.author ? `${item.author}: ` : ""}</span>
+        {item.url ? (
+          <a href={item.url} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline">
+            {item.text}
+          </a>
+        ) : (
+          <span className="text-slate-200">{item.text}</span>
+        )}
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm">
+      <span className="font-semibold text-slate-400">💬 {item.author ?? "Someone"}:</span>{" "}
+      <span className="text-slate-300">{item.text}</span>
+    </p>
+  );
+}
+
 export function TranscriptPane({
   segments,
   interims,
+  context,
   speakerNames,
   roster,
   onRename,
@@ -98,6 +130,7 @@ export function TranscriptPane({
 }: {
   segments: TranscriptSegment[];
   interims: Record<string, TranscriptSegment | undefined>;
+  context: ContextItem[];
   speakerNames: Names;
   roster: string[];
   onRename: (identity: string, name: string) => void;
@@ -114,9 +147,19 @@ export function TranscriptPane({
     return Array.from(map.entries());
   }, [segments, interimList]);
 
+  // Merge spoken segments and non-spoken context into one time-ordered timeline.
+  const timeline = useMemo(() => {
+    const rows = [
+      ...segments.map((seg) => ({ at: seg.at, key: `s${seg.id}`, seg, item: null as ContextItem | null })),
+      ...context.map((item) => ({ at: item.at, key: `c${item.id}`, seg: null as TranscriptSegment | null, item })),
+    ];
+    rows.sort((a, b) => a.at - b.at);
+    return rows;
+  }, [segments, context]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [segments.length, interimList.length]);
+  }, [timeline.length, interimList.length]);
 
   return (
     <section className="flex h-full flex-col rounded-xl border border-edge bg-panel">
@@ -149,18 +192,24 @@ export function TranscriptPane({
       )}
 
       <div className="thin-scroll flex-1 space-y-3 overflow-y-auto p-4 text-sm leading-relaxed">
-        {segments.length === 0 && interimList.length === 0 && (
+        {timeline.length === 0 && interimList.length === 0 && (
           <p className="text-muted">
             Nothing yet. Start a meeting and speak — the far end is captured from the shared tab,
-            your voice from the mic.
+            your voice from the mic. Chat, shared links, and captured slides show up here too.
           </p>
         )}
-        {segments.map((seg) => (
-          <p key={seg.id}>
-            <span className={`font-semibold ${colorFor(seg)}`}>{resolveName(seg, speakerNames)}:</span>{" "}
-            <span className="text-slate-100">{seg.text}</span>
-          </p>
-        ))}
+        {timeline.map((row) =>
+          row.seg ? (
+            <p key={row.key}>
+              <span className={`font-semibold ${colorFor(row.seg)}`}>
+                {resolveName(row.seg, speakerNames)}:
+              </span>{" "}
+              <span className="text-slate-100">{row.seg.text}</span>
+            </p>
+          ) : (
+            <ContextRow key={row.key} item={row.item!} />
+          ),
+        )}
         {interimList.map((seg) => (
           <p key={`interim-${identityOf(seg)}`} className="opacity-60">
             <span className={`font-semibold ${colorFor(seg)}`}>{resolveName(seg, speakerNames)}:</span>{" "}

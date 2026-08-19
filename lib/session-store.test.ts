@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  addSlideContext,
   clearSession,
+  contextText,
   hasContent,
   isCaptionDriven,
   recentTranscript,
   recordCaption,
+  recordChat,
   recordSegment,
   setActiveSession,
   transcriptText,
@@ -82,6 +85,43 @@ describe("session-store", () => {
     // Override the "me" channel and rename the named speaker "Sarah".
     const out = transcriptText("s1", { me: "Ahmed", Sarah: "Dr. Lee" });
     expect(out).toBe("Ahmed: hi\nDr. Lee: yo");
+  });
+});
+
+describe("session-store context (chat / docs / slides)", () => {
+  afterEach(() => {
+    clearSession("ctx1");
+  });
+
+  it("drops chat when there is no active session", () => {
+    expect(recordChat({ author: "Sam", text: "hi" })).toBeNull();
+  });
+
+  it("stores a plain chat message as a chat item", () => {
+    setActiveSession("ctx1");
+    const rec = recordChat({ author: "Sam", text: "quick question" });
+    expect(rec?.item.kind).toBe("chat");
+    expect(contextText("ctx1")).toBe("[chat] Sam: quick question");
+  });
+
+  it("treats a chat message with a link as a shared doc", () => {
+    setActiveSession("ctx1");
+    const rec = recordChat({ author: "Sam", text: "deck: https://docs.example/deck" });
+    expect(rec?.item.kind).toBe("doc");
+    expect(rec?.item.url).toBe("https://docs.example/deck");
+  });
+
+  it("stores extracted slide content as a slide item", () => {
+    const item = addSlideContext("ctx1", "Q3 Roadmap — three bets");
+    expect(item.kind).toBe("slide");
+    expect(contextText("ctx1")).toContain("[shared slide] Q3 Roadmap — three bets");
+  });
+
+  it("context alone counts as content for summary/insights", () => {
+    setActiveSession("ctx1");
+    expect(hasContent("ctx1")).toBe(false);
+    recordChat({ author: "Sam", text: "hello" });
+    expect(hasContent("ctx1")).toBe(true);
   });
 });
 

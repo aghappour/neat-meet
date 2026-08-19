@@ -1,5 +1,5 @@
 import type { RawSegment } from "@/lib/transcription/provider";
-import type { TranscriptSegment } from "@/lib/types";
+import type { ContextItem, TranscriptSegment } from "@/lib/types";
 
 interface Session {
   id: string;
@@ -7,6 +7,9 @@ interface Session {
   /** Finalized segments only, in arrival order. */
   segments: TranscriptSegment[];
   nextId: number;
+  /** Non-spoken context: chat, shared docs/links, captured slides. */
+  context: ContextItem[];
+  nextContextId: number;
   /**
    * True once Google Meet captions (from the companion extension) start
    * flowing for this session. While true, the server suppresses duplicate
@@ -36,7 +39,15 @@ const sessions: Map<string, Session> =
 export function getOrCreateSession(id: string): Session {
   let s = sessions.get(id);
   if (!s) {
-    s = { id, createdAt: Date.now(), segments: [], nextId: 1, captionDriven: false };
+    s = {
+      id,
+      createdAt: Date.now(),
+      segments: [],
+      nextId: 1,
+      context: [],
+      nextContextId: 1,
+      captionDriven: false,
+    };
     sessions.set(id, s);
   }
   return s;
@@ -96,6 +107,59 @@ export function recordCaption(caption: {
   return { sessionId, segment };
 }
 
+const URL_RE = /\bhttps?:\/\/[^\s]+/i;
+
+/** Store a context item against a session, assigning a monotonic id. */
+function addContext(sessionId: string, item: Omit<ContextItem, "id">): ContextItem {
+  const s = getOrCreateSession(sessionId);
+  const stored: ContextItem = { ...item, id: s.nextContextId++ };
+  s.context.push(stored);
+  return stored;
+}
+
+/**
+ * Record a Meet chat message against the active session. A URL in the text is
+ * pulled out as a shared document; otherwise it's a plain chat item. Returns the
+ * stored item and session id, or null when there is no active session.
+ */
+export function recordChat(chat: {
+  author: string;
+  text: string;
+  url?: string;
+}): { sessionId: string; item: ContextItem } | null {
+  const sessionId = activeSessionId();
+  if (!sessionId) return null;
+  const url = chat.url ?? chat.text.match(URL_RE)?.[0];
+  const item = addContext(sessionId, {
+    kind: url ? "doc" : "chat",
+    at: Date.now(),
+    author: chat.author,
+    text: chat.text,
+    url,
+  });
+  return { sessionId, item };
+}
+
+/** Record extracted content from a shared video frame (slide) against a session. */
+export function addSlideContext(sessionId: string, text: string): ContextItem {
+  return addContext(sessionId, { kind: "slide", at: Date.now(), text });
+}
+
+/**
+ * A prompt block summarizing non-spoken context (chat, shared docs, slides).
+ * Empty string when there's nothing, so callers can append unconditionally.
+ */
+export function contextText(sessionId: string): string {
+  const s = sessions.get(sessionId);
+  if (!s || s.context.length === 0) return "";
+  const lines = s.context.map((c) => {
+    if (c.kind === "slide") return `[shared slide] ${c.text}`;
+    if (c.kind === "doc") return `[shared doc] ${c.author ? `${c.author}: ` : ""}${c.text}`;
+    return `[chat] ${c.author ?? "Someone"}: ${c.text}`;
+  });
+  return lines.join("\n");
+}
+
 /** Full transcript as speaker-attributed lines, honoring name overrides. */
 export function transcriptText(sessionId: string, names?: SpeakerNames): string {
   const s = sessions.get(sessionId);
@@ -110,7 +174,9 @@ export function recentTranscript(sessionId: string, maxChars = 4000, names?: Spe
 }
 
 export function hasContent(sessionId: string): boolean {
-  return (sessions.get(sessionId)?.segments.length ?? 0) > 0;
+  const s = sessions.get(sessionId);
+  if (!s) return false;
+  return s.segments.length > 0 || s.context.length > 0;
 }
 
 export function clearSession(sessionId: string): void {

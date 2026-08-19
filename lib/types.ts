@@ -24,6 +24,24 @@ export interface TranscriptSegment {
   origin?: "whisper" | "meet";
 }
 
+/**
+ * Non-spoken meeting context: chat messages, shared links/documents, and
+ * snapshots of shared video frames (e.g. a slide). Kept alongside the transcript
+ * and fed to the summary/insight prompts.
+ */
+export interface ContextItem {
+  id: number;
+  kind: "chat" | "doc" | "slide";
+  /** Wall-clock epoch ms. */
+  at: number;
+  /** Chat author (chat only). */
+  author?: string;
+  /** Chat text, shared-doc title, or extracted slide content. */
+  text: string;
+  /** Link for a shared document / URL posted in chat. */
+  url?: string;
+}
+
 // Audio framing over the WebSocket:
 //  - Control messages are JSON strings (ClientAudioMessage / ServerAudioMessage).
 //  - Audio is sent as BINARY frames, each prefixed with a single channel byte:
@@ -43,12 +61,16 @@ export type ClientAudioMessage =
       speakerName: string;
       text: string;
       interim?: boolean;
-    };
+    }
+  // Sent by the Meet extension: a chat message (with an optional shared link).
+  // No sessionId — routed to the active session, like captions.
+  | { type: "chat"; author: string; text: string; url?: string };
 
 /** Messages the server pushes down the audio WebSocket. */
 export type ServerAudioMessage =
   | { type: "ready"; sessionId: string }
   | { type: "segment"; segment: TranscriptSegment }
+  | { type: "context"; item: ContextItem }
   | { type: "error"; message: string };
 
 export type WhisperProfile = "capable" | "modest";
