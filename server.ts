@@ -22,6 +22,7 @@ import {
   isCaptionDriven,
 } from "./lib/session-store";
 import { CHANNEL_BYTE, type ClientAudioMessage, type WhisperProfile } from "./lib/types";
+import { startSignalIngest, signalIngestEnabled } from "./lib/messages/signal-ingest";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -193,6 +194,10 @@ app.prepare().then(() => {
   });
 
   startSidecar();
+
+  // Opt-in message archive: stream incoming Signal messages from the local
+  // signal-cli daemon into the on-disk store (SIGNAL_INGEST=1 + SIGNAL_CLI_URL).
+  if (signalIngestEnabled()) startSignalIngest();
 
   server.listen(port, () => {
     console.log(`> neat-meet ready on http://localhost:${port}`);
