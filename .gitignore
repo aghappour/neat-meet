@@ -28,3 +28,6 @@ e2e/.auth/
 /supabase/
 backend/supabase/*
 !backend/supabase/config.toml
+
+# Environment-specific egress-inspection CA (see Dockerfiles)
+ca-bundle.crt

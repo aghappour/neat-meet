@@ -1,7 +1,12 @@
 FROM node:22-slim
 
 WORKDIR /app
-COPY package*.json ./
+# Local fork: restricted networks intercept TLS with their own CA. If the build
+# context provides ca-bundle.crt (gitignored, copied in by the operator), trust
+# it for npm; the glob makes this a no-op when the file is absent, and Node
+# merely warns when NODE_EXTRA_CA_CERTS points at a missing file.
+COPY package*.json ca-bundle.crt* ./
+ENV NODE_EXTRA_CA_CERTS=/app/ca-bundle.crt
 RUN npm ci
 COPY . .
 

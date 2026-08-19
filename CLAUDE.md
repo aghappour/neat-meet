@@ -67,6 +67,10 @@ Frontend (Next.js App Router, `frontend/src/app/`):
    cdn.sheetjs.com. Re-check on every upstream sync.
 2. `backend/Dockerfile`: LibreOffice apt install is best-effort (egress policy blocks
    apt mirrors); without it only DOC/DOCX → PDF conversion is disabled.
+2b. Both Dockerfiles trust an optional `ca-bundle.crt` from the build context
+   (NODE_EXTRA_CA_CERTS): this box's egress gateway TLS-intercepts npm traffic.
+   The bundle itself is gitignored; copy /root/.ccr/ca-bundle.crt into backend/
+   and frontend/ before building images here. No-op when the file is absent.
 3. Provider API keys are intentionally blank in `backend/.env` so per-user keys stay
    editable in Settings → Models & API Keys. Ollama is reached on the host at
    OLLAMA_BASE_URL (default http://host.docker.internal:11434/v1).
