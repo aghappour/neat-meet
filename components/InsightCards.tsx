@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Insight, ShareTarget } from "@/lib/types";
+import type { Insight, InsightsVersion, ShareTarget } from "@/lib/types";
 
 const TARGET_LABELS: Record<ShareTarget, string> = {
   slack: "Slack",
@@ -82,24 +82,32 @@ function ShareRow({
 }
 
 export function InsightCards({
-  insights,
+  history,
   loading,
   onRefresh,
   onShare,
   disabled,
   targets,
-  grounded,
 }: {
-  insights: Insight[];
+  history: InsightsVersion[];
   loading: boolean;
   onRefresh: () => void;
   onShare: (insight: Insight, target: ShareTarget, destination: string) => Promise<void>;
   disabled: boolean;
   /** Share targets a configured connector can deliver. */
   targets: ShareTarget[];
-  /** Connector labels the last run was grounded in. */
-  grounded: string[];
 }) {
+  // idx === -1 follows the latest generation; otherwise a pinned position.
+  const [idx, setIdx] = useState(-1);
+  const total = history.length;
+  const pos = idx === -1 ? total - 1 : Math.min(idx, total - 1);
+  const current = total > 0 ? history[pos] : null;
+  const insights = current?.insights ?? [];
+  const grounded = current?.grounded ?? [];
+  const goPrev = () => setIdx(Math.max(0, pos - 1));
+  const goNext = () => setIdx(pos + 1 >= total - 1 ? -1 : pos + 1);
+  const following = idx === -1 || pos === total - 1;
+
   return (
     <section className="flex h-full flex-col rounded-xl border border-edge bg-panel">
       <header className="flex items-center justify-between border-b border-edge px-4 py-3">
@@ -119,6 +127,23 @@ export function InsightCards({
           {loading ? "Thinking…" : "Generate"}
         </button>
       </header>
+      {total > 1 && (
+        <div className="flex items-center justify-between border-b border-edge px-4 py-1.5 text-xs text-muted">
+          <div className="flex items-center gap-2">
+            <button onClick={goPrev} disabled={pos === 0} className="disabled:opacity-30">
+              ◀
+            </button>
+            <span>
+              {pos + 1} / {total}
+              {following && <span className="ml-1 text-emerald-300">· latest</span>}
+            </span>
+            <button onClick={goNext} disabled={following} className="disabled:opacity-30">
+              ▶
+            </button>
+          </div>
+          {current && <span>{new Date(current.at).toLocaleTimeString()}</span>}
+        </div>
+      )}
       <div className="thin-scroll flex-1 space-y-3 overflow-y-auto p-4">
         {insights.length === 0 && !loading && (
           <p className="text-sm text-muted">

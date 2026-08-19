@@ -6,6 +6,12 @@ export interface TranscriptSegment {
   id: number;
   /** "me" = the local mic; "them" = far-end (meeting tab) audio. */
   speaker: "me" | "them" | "unknown";
+  /**
+   * Resolved human name for the speaker when known — e.g. from Google Meet
+   * captions (via the companion extension). Absent for channel-only
+   * (Whisper) segments, which fall back to the me/them label.
+   */
+  speakerName?: string;
   /** The recognized text. */
   text: string;
   /** True while the provider may still revise this segment. */
@@ -14,6 +20,8 @@ export interface TranscriptSegment {
   startMs: number;
   /** Wall-clock epoch ms when the segment was finalized (final only). */
   at: number;
+  /** Where this segment came from: local Whisper, or Meet captions. */
+  origin?: "whisper" | "meet";
 }
 
 // Audio framing over the WebSocket:
@@ -23,10 +31,19 @@ export interface TranscriptSegment {
 //      bytes 1..: little-endian Int16 PCM, mono, 16 kHz.
 export const CHANNEL_BYTE = { me: 0x00, them: 0x01 } as const;
 
-/** JSON control messages the browser sends up the audio WebSocket. */
+/** JSON control messages sent up the audio WebSocket (by the app or the extension). */
 export type ClientAudioMessage =
   | { type: "start"; sessionId: string; sampleRate: number; profile: WhisperProfile }
-  | { type: "stop" };
+  | { type: "stop" }
+  // Sent by the Google Meet companion extension: a caption line with a real
+  // speaker name. No sessionId — the server routes it to the active session.
+  | {
+      type: "caption";
+      speaker: "me" | "them";
+      speakerName: string;
+      text: string;
+      interim?: boolean;
+    };
 
 /** Messages the server pushes down the audio WebSocket. */
 export type ServerAudioMessage =
@@ -59,3 +76,16 @@ export interface MeetingSummary {
 
 /** Where a shared insight should be delivered. */
 export type ShareTarget = "slack" | "notion" | "gmail" | "telegram";
+
+/** One timestamped rolling-summary generation, retained for the history view. */
+export interface SummaryVersion {
+  at: number;
+  summary: MeetingSummary;
+}
+
+/** One timestamped insights generation, retained for the history view. */
+export interface InsightsVersion {
+  at: number;
+  insights: Insight[];
+  grounded: string[];
+}

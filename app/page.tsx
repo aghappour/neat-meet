@@ -14,8 +14,17 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function Page() {
-  const { state, setProfile, setAutoSummary, start, stop, refreshSummary, refreshInsights, share } =
-    useMeeting();
+  const {
+    state,
+    setProfile,
+    setAutoSummary,
+    setSpeakerName,
+    start,
+    stop,
+    refreshSummary,
+    refreshInsights,
+    share,
+  } = useMeeting();
   const live = state.status === "live";
   const notStarted = state.status === "idle" || state.status === "error";
 
@@ -82,11 +91,17 @@ export default function Page() {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="min-h-0 lg:col-span-1">
-          <TranscriptPane segments={state.segments} interims={state.interims} />
+          <TranscriptPane
+            segments={state.segments}
+            interims={state.interims}
+            speakerNames={state.speakerNames}
+            onRename={setSpeakerName}
+            captionsActive={state.captionsActive}
+          />
         </div>
         <div className="min-h-0 lg:col-span-1">
           <SummaryPane
-            summary={state.summary}
+            history={state.summaryHistory}
             loading={state.summarizing}
             onRefresh={refreshSummary}
             disabled={state.segments.length === 0}
@@ -96,10 +111,9 @@ export default function Page() {
         </div>
         <div className="min-h-0 lg:col-span-1">
           <InsightCards
-            insights={state.insights}
+            history={state.insightHistory}
             loading={state.insightsLoading}
             targets={state.targets}
-            grounded={state.grounded}
             onRefresh={refreshInsights}
             onShare={async (insight, target, destination) => {
               await share(insight, target, destination);

@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Insight,
+  InsightsVersion,
   MeetingSummary,
   ServerAudioMessage,
   ShareTarget,
+  SummaryVersion,
   TranscriptSegment,
   WhisperProfile,
 } from "@/lib/types";
@@ -23,13 +25,21 @@ interface MeetingState {
   summarizing: boolean;
   /** When on, the summary re-runs on an interval while the meeting is live. */
   autoSummary: boolean;
+  /** Every summary generated this session, oldest first (latest is current). */
+  summaryHistory: SummaryVersion[];
   insights: Insight[];
   insightsLoading: boolean;
   /** Connector labels the last insight run was grounded in, e.g. ["Notion"]. */
   grounded: string[];
+  /** Every insights generation this session, oldest first. */
+  insightHistory: InsightsVersion[];
   /** Share targets a configured connector can actually deliver. */
   targets: ShareTarget[];
   profile: WhisperProfile;
+  /** User (or Meet) overrides of speaker display names, keyed by identity. */
+  speakerNames: Record<string, string>;
+  /** True once Google Meet captions (via the extension) are driving the transcript. */
+  captionsActive: boolean;
 }
 
 const WS_PATH = "/api/audio";
@@ -45,9 +55,13 @@ export function useMeeting() {
     summary: null,
     summarizing: false,
     autoSummary: true,
+    summaryHistory: [],
     insights: [],
     insightsLoading: false,
     grounded: [],
+    insightHistory: [],
+    speakerNames: {},
+    captionsActive: false,
     targets: [],
     // Default to the profile that keeps up on a CPU-only machine — `capable`
     // needs a CUDA GPU to hit its latency target.
@@ -64,6 +78,8 @@ export function useMeeting() {
   const segmentCountRef = useRef(0);
   const summarizingRef = useRef(false);
   const lastSummarizedCountRef = useRef(0);
+  // Latest speaker-name overrides, mirrored for the stable refresh callbacks.
+  const speakerNamesRef = useRef<Record<string, string>>({});
 
   const patch = useCallback((p: Partial<MeetingState>) => {
     setState((s) => ({ ...s, ...p }));
@@ -73,6 +89,22 @@ export function useMeeting() {
   const setAutoSummary = useCallback(
     (autoSummary: boolean) => patch({ autoSummary }),
     [patch],
+  );
+
+  // Rename (or clear) a speaker. `identity` is the speaker's own name when known
+  // (from Meet), else the channel key "me"/"them". A blank name clears the override.
+  const setSpeakerName = useCallback(
+    (identity: string, name: string) => {
+      setState((s) => {
+        const next = { ...s.speakerNames };
+        const trimmed = name.trim();
+        if (trimmed) next[identity] = trimmed;
+        else delete next[identity];
+        speakerNamesRef.current = next;
+        return { ...s, speakerNames: next };
+      });
+    },
+    [],
   );
 
   // Keep the interval's refs in step with render state (see the interval below).
@@ -115,14 +147,19 @@ export function useMeeting() {
       patch({ status: "live" });
     } else if (msg.type === "segment") {
       const seg = msg.segment;
+      const captionsActive = seg.origin === "meet";
+      // Key interims by resolved speaker so two Meet speakers don't overwrite
+      // each other's in-progress line (channel alone would collide).
+      const interimKey = seg.speakerName ?? seg.speaker;
       setState((s) => {
+        const captions = s.captionsActive || captionsActive;
         if (seg.interim) {
-          return { ...s, interims: { ...s.interims, [seg.speaker]: seg } };
+          return { ...s, captionsActive: captions, interims: { ...s.interims, [interimKey]: seg } };
         }
         // Finalize: append and clear that speaker's interim.
         const interims = { ...s.interims };
-        delete interims[seg.speaker];
-        return { ...s, segments: [...s.segments, seg], interims };
+        delete interims[interimKey];
+        return { ...s, captionsActive: captions, segments: [...s.segments, seg], interims };
       });
     } else if (msg.type === "error") {
       patch({ status: "error", error: msg.message });
@@ -135,13 +172,19 @@ export function useMeeting() {
     // per session — so carrying the previous meeting's state over would collide
     // on segment id and blend two transcripts into one pane.
     lastSummarizedCountRef.current = 0;
+    speakerNamesRef.current = {};
     patch({
       status: "connecting",
       error: null,
       segments: [],
       interims: {},
       summary: null,
+      summaryHistory: [],
       insights: [],
+      grounded: [],
+      insightHistory: [],
+      speakerNames: {},
+      captionsActive: false,
     });
 
     try {
@@ -252,12 +295,20 @@ export function useMeeting() {
       const res = await fetch("/api/summary", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionIdRef.current }),
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          speakerNames: speakerNamesRef.current,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Summary failed");
       const summary = (await res.json()) as MeetingSummary;
       lastSummarizedCountRef.current = requestCount;
-      patch({ summary, summarizing: false });
+      setState((s) => ({
+        ...s,
+        summary,
+        summarizing: false,
+        summaryHistory: [...s.summaryHistory, { at: Date.now(), summary }],
+      }));
     } catch (err) {
       patch({ summarizing: false, error: (err as Error).message });
     }
@@ -283,14 +334,24 @@ export function useMeeting() {
       const res = await fetch("/api/insights", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionIdRef.current }),
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          speakerNames: speakerNamesRef.current,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Insights failed");
       const { insights, grounded } = (await res.json()) as {
         insights: Insight[];
         grounded?: string[];
       };
-      patch({ insights, grounded: grounded ?? [], insightsLoading: false });
+      const g = grounded ?? [];
+      setState((s) => ({
+        ...s,
+        insights,
+        grounded: g,
+        insightsLoading: false,
+        insightHistory: [...s.insightHistory, { at: Date.now(), insights, grounded: g }],
+      }));
     } catch (err) {
       patch({ insightsLoading: false, error: (err as Error).message });
     }
@@ -313,6 +374,7 @@ export function useMeeting() {
     state,
     setProfile,
     setAutoSummary,
+    setSpeakerName,
     start,
     stop,
     refreshSummary,

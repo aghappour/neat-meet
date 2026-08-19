@@ -14,7 +14,12 @@ import { join } from "node:path";
 import next from "next";
 import { WebSocketServer, WebSocket } from "ws";
 import { createProvider, type TranscriptionProvider } from "./lib/transcription/provider";
-import { recordSegment } from "./lib/session-store";
+import {
+  recordSegment,
+  recordCaption,
+  setActiveSession,
+  isCaptionDriven,
+} from "./lib/session-store";
 import { CHANNEL_BYTE, type ClientAudioMessage, type WhisperProfile } from "./lib/types";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -27,6 +32,35 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 let sidecar: ChildProcess | null = null;
+
+/**
+ * Sockets watching each session. The app page opens one; the Google Meet
+ * companion extension opens another (to push captions). When a caption arrives
+ * on any socket we fan the resulting segment out to every socket watching the
+ * active session, so the app's transcript updates even though the words came in
+ * through the extension's connection.
+ */
+const liveSockets = new Map<string, Set<WebSocket>>();
+
+function watch(sessionId: string, ws: WebSocket): void {
+  let set = liveSockets.get(sessionId);
+  if (!set) liveSockets.set(sessionId, (set = new Set()));
+  set.add(ws);
+}
+
+function unwatch(ws: WebSocket): void {
+  for (const [sessionId, set] of liveSockets) {
+    set.delete(ws);
+    if (set.size === 0) liveSockets.delete(sessionId);
+  }
+}
+
+function broadcast(sessionId: string, msg: object): void {
+  const set = liveSockets.get(sessionId);
+  if (!set) return;
+  const data = JSON.stringify(msg);
+  for (const ws of set) if (ws.readyState === WebSocket.OPEN) ws.send(data);
+}
 
 /**
  * Interpreter for the sidecar. The README has you install the dependencies into
@@ -110,6 +144,8 @@ app.prepare().then(() => {
 
       if (msg.type === "start") {
         sessionId = msg.sessionId;
+        setActiveSession(sessionId);
+        watch(sessionId, ws);
         try {
           provider = await createProvider(providerKind, {
             profile: (msg.profile ?? "modest") as WhisperProfile,
@@ -117,6 +153,9 @@ app.prepare().then(() => {
             deepgramApiKey: process.env.DEEPGRAM_API_KEY,
           });
           provider.onSegment((raw) => {
+            // Once Meet captions are flowing they are the source of truth; drop
+            // Whisper output to avoid transcribing the same words twice.
+            if (isCaptionDriven(sessionId)) return;
             const segment = recordSegment(sessionId, raw);
             send({ type: "segment", segment });
           });
@@ -126,6 +165,15 @@ app.prepare().then(() => {
         } catch (err) {
           send({ type: "error", message: (err as Error).message });
         }
+      } else if (msg.type === "caption") {
+        // From the Meet extension: attribute to the active session and fan out.
+        const recorded = recordCaption({
+          speaker: msg.speaker,
+          speakerName: msg.speakerName,
+          text: msg.text,
+          interim: msg.interim,
+        });
+        if (recorded) broadcast(recorded.sessionId, { type: "segment", segment: recorded.segment });
       } else if (msg.type === "stop") {
         provider?.stop();
         provider = null;
@@ -135,6 +183,7 @@ app.prepare().then(() => {
     ws.on("close", () => {
       provider?.stop();
       provider = null;
+      unwatch(ws);
     });
   });
 

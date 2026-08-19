@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { hasContent, recentTranscript } from "@/lib/session-store";
+import { hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
 import { enabledConnectors, mcpRequestFragments } from "@/lib/connectors";
 import type { Insight } from "@/lib/types";
 
@@ -22,8 +22,9 @@ Keep insights specific and immediately useful. Prefer grounded facts over generi
 
 export async function POST(req: Request) {
   let sessionId: string;
+  let speakerNames: SpeakerNames | undefined;
   try {
-    ({ sessionId } = await req.json());
+    ({ sessionId, speakerNames } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -32,7 +33,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No transcript yet" }, { status: 400 });
   }
 
-  const transcript = recentTranscript(sessionId, 4000);
+  // Full transcript → insights consider the whole meeting, not just a window.
+  const transcript = transcriptText(sessionId, speakerNames);
   const connectors = enabledConnectors();
 
   try {
@@ -45,7 +47,7 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: `Recent discussion:\n\n${transcript}\n\nSurface sharable insights as instructed.`,
+          content: `Meeting so far:\n\n${transcript}\n\nSurface sharable insights as instructed.`,
         },
       ],
     };

@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearSession,
   hasContent,
+  isCaptionDriven,
   recentTranscript,
+  recordCaption,
   recordSegment,
+  setActiveSession,
   transcriptText,
 } from "@/lib/session-store";
 import type { RawSegment } from "@/lib/transcription/provider";
@@ -66,5 +69,39 @@ describe("session-store", () => {
     clearSession("s1");
     expect(hasContent("s1")).toBe(false);
     expect(transcriptText("s1")).toBe("");
+  });
+
+  it("renders a segment's own speakerName by default", () => {
+    recordSegment("s1", raw({ speaker: "them", speakerName: "Sarah", text: "hi" }));
+    expect(transcriptText("s1")).toBe("Sarah: hi");
+  });
+
+  it("applies name overrides by channel and by speaker name", () => {
+    recordSegment("s1", raw({ speaker: "me", text: "hi" }));
+    recordSegment("s1", raw({ speaker: "them", speakerName: "Sarah", text: "yo" }));
+    // Override the "me" channel and rename the named speaker "Sarah".
+    const out = transcriptText("s1", { me: "Ahmed", Sarah: "Dr. Lee" });
+    expect(out).toBe("Ahmed: hi\nDr. Lee: yo");
+  });
+});
+
+describe("session-store captions", () => {
+  afterEach(() => {
+    clearSession("cap1");
+  });
+
+  it("drops captions when there is no active session", () => {
+    expect(recordCaption({ speaker: "them", speakerName: "Sarah", text: "hi" })).toBeNull();
+  });
+
+  it("routes captions to the active session and marks it caption-driven", () => {
+    setActiveSession("cap1");
+    expect(isCaptionDriven("cap1")).toBe(false);
+    const rec = recordCaption({ speaker: "them", speakerName: "Sarah", text: "hello" });
+    expect(rec?.sessionId).toBe("cap1");
+    expect(rec?.segment.origin).toBe("meet");
+    expect(rec?.segment.speakerName).toBe("Sarah");
+    expect(isCaptionDriven("cap1")).toBe(true);
+    expect(transcriptText("cap1")).toBe("Sarah: hello");
   });
 });

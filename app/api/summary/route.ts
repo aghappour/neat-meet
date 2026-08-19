@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CLAUDE_MODEL, extractJson, firstText, getClient } from "@/lib/claude";
-import { hasContent, transcriptText } from "@/lib/session-store";
+import { hasContent, transcriptText, type SpeakerNames } from "@/lib/session-store";
 import type { MeetingSummary } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -21,8 +21,9 @@ Rules: be concise and factual; include only what the transcript supports; use []
 
 export async function POST(req: Request) {
   let sessionId: string;
+  let speakerNames: SpeakerNames | undefined;
   try {
-    ({ sessionId } = await req.json());
+    ({ sessionId, speakerNames } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
@@ -31,7 +32,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No transcript yet" }, { status: 400 });
   }
 
-  const transcript = transcriptText(sessionId);
+  // Full transcript each time → the summary is cumulative over the whole meeting.
+  const transcript = transcriptText(sessionId, speakerNames);
 
   try {
     const client = getClient();

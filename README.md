@@ -34,18 +34,25 @@ Zoom/Teams web) and tick "Share tab audio" in the share picker.
 Requires Node 20+ and Python 3.10+.
 
 ```bash
-# 1. JS deps
 npm install
+npm run setup   # venv + Whisper deps + seeds .env from .env.example
+```
 
-# 2. Whisper sidecar (local, private STT)
+Then put your Anthropic key in `.env` (`ANTHROPIC_API_KEY=…`) or use OAuth
+(`ant auth login`, then `npm run dev:auth`). The API is billed separately from a
+Claude subscription — add credits at <https://console.anthropic.com/settings/billing>.
+
+<details><summary>Manual setup (what <code>npm run setup</code> does)</summary>
+
+```bash
+npm install
 cd whisper-sidecar
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cd ..
-
-# 3. Config
-cp .env.example .env   # then fill in ANTHROPIC_API_KEY (+ any connectors)
+cp .env.example .env
 ```
+</details>
 
 ## Run
 
@@ -56,6 +63,23 @@ npm run dev
 Open http://localhost:3000, click **Start meeting**, and in the share picker
 choose your meeting tab with **Share tab audio** enabled. The server spawns the
 Whisper sidecar automatically.
+
+- **Transcript pane** — each distinct speaker gets a chip at the top; click one to
+  **rename** them. The name is used everywhere, including in what's sent to Claude.
+- **Rolling summary** — refreshes automatically as the conversation grows (toggle
+  **Auto**); each summary covers the **whole meeting so far**, and past versions are
+  kept — step through them with **◀ / ▶**.
+- **Insights** — **Generate** grounds talking points in your connected tools; like
+  the summary they consider the full meeting and keep a browsable history.
+
+### Google Meet speaker names
+
+neat-meet only receives the meeting tab's *audio*, so on its own it labels the far
+end "Participant." To get **real per-person names**, load the companion Chrome
+extension in [`extension/`](extension/) and turn on Meet's live captions — it reads
+Meet's speaker-attributed captions and streams them in. While captions are flowing
+they become the transcript source and local Whisper is paused (no double
+transcription). See [`extension/README.md`](extension/README.md) to install.
 
 ## Configuration
 
@@ -91,6 +115,7 @@ locally — a possible future add-on, not part of this build.
 
 | Script | What it does |
 |--------|--------------|
+| `npm run setup` | venv + Whisper deps + seed `.env` (one-time) |
 | `npm run dev` | Start the app + spawn the Whisper sidecar |
 | `npm run build` | Production build |
 | `npm run start` | Run the production build |
@@ -108,6 +133,7 @@ locally — a possible future add-on, not part of this build.
 - `lib/claude.ts` — Anthropic client + shared helpers
 - `app/api/{summary,insights,share}/` — Claude-backed endpoints
 - `components/` + `app/page.tsx` — capture + transcript / summary / insight UI
+- `extension/` — Chrome extension that imports Google Meet speaker-attributed captions
 
 ## Privacy
 
