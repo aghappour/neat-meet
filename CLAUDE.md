@@ -71,7 +71,13 @@ Frontend (Next.js App Router, `frontend/src/app/`):
    (NODE_EXTRA_CA_CERTS): this box's egress gateway TLS-intercepts npm traffic.
    The bundle itself is gitignored; copy /root/.ccr/ca-bundle.crt into backend/
    and frontend/ before building images here. No-op when the file is absent.
-3. Provider API keys are intentionally blank in `backend/.env` so per-user keys stay
+3. Frontend image builds from the repo root via `docker/frontend-local.Dockerfile`
+   (wired in docker-compose.override.yml): the frontend type check imports types
+   from `backend/src/lib/{sourceDocuments,chat/types}` (see
+   `frontend/src/app/components/shared/types.ts`), which upstream's `./frontend`
+   build context cannot see, so upstream's frontend/Dockerfile fails `next build`.
+   Worth reporting upstream.
+4. Provider API keys are intentionally blank in `backend/.env` so per-user keys stay
    editable in Settings → Models & API Keys. Ollama is reached on the host at
    OLLAMA_BASE_URL (default http://host.docker.internal:11434/v1).
 

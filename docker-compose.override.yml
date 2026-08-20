@@ -21,7 +21,11 @@ services:
         no_proxy: ${no_proxy:-}
   frontend:
     build:
-      context: ./frontend
+      # Repo-root context: the frontend type check imports type definitions from
+      # backend/src (see docker/frontend-local.Dockerfile), which upstream's
+      # ./frontend context cannot see.
+      context: .
+      dockerfile: docker/frontend-local.Dockerfile
       network: host
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
