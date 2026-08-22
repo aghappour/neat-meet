@@ -1,0 +1,106 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  connectorForTarget,
+  deliverableTargets,
+  enabledConnectors,
+  mcpRequestFragments,
+} from "@/lib/connectors";
+
+const CONNECTOR_ENV = [
+  "NOTION_MCP_URL",
+  "NOTION_MCP_TOKEN",
+  "SLACK_MCP_URL",
+  "SLACK_MCP_TOKEN",
+  "GDRIVE_MCP_URL",
+  "GDRIVE_MCP_TOKEN",
+  "ZAPIER_MCP_URL",
+  "ZAPIER_MCP_TOKEN",
+];
+
+describe("connectors", () => {
+  beforeEach(() => {
+    for (const k of CONNECTOR_ENV) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const k of CONNECTOR_ENV) delete process.env[k];
+  });
+
+  it("skips connectors with no URL", () => {
+    expect(enabledConnectors()).toEqual([]);
+  });
+
+  it("enables a connector with a URL even when the token is blank (Option A)", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    const enabled = enabledConnectors();
+    expect(enabled.map((c) => c.name)).toEqual(["zapier"]);
+    expect(enabled[0].token).toBe("");
+  });
+
+  it("omits authorization_token from the request when no token is set", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    const { mcp_servers } = mcpRequestFragments(enabledConnectors());
+    expect(mcp_servers[0]).not.toHaveProperty("authorization_token");
+  });
+
+  it("includes authorization_token when a token is set", () => {
+    process.env.NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+    process.env.NOTION_MCP_TOKEN = "secret";
+    const { mcp_servers, tools } = mcpRequestFragments(enabledConnectors());
+    expect(mcp_servers[0]).toMatchObject({
+      name: "notion",
+      url: "https://mcp.notion.com/mcp",
+      authorization_token: "secret",
+    });
+    expect(tools[0]).toEqual({ type: "mcp_toolset", mcp_server_name: "notion" });
+  });
+
+  it("routes Gmail/Telegram share targets to the Zapier connector", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    expect(connectorForTarget("gmail")?.name).toBe("zapier");
+    expect(connectorForTarget("telegram")?.name).toBe("zapier");
+  });
+
+  it("returns null for a target whose connector is not configured", () => {
+    expect(connectorForTarget("slack")).toBeNull();
+  });
+
+  it("falls back to Zapier for a target with no dedicated connector", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    expect(connectorForTarget("slack")?.name).toBe("zapier");
+    expect(connectorForTarget("notion")?.name).toBe("zapier");
+  });
+
+  it("prefers a dedicated connector over the Zapier fallback", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(connectorForTarget("slack")?.name).toBe("slack");
+    // Notion still has none of its own, so it keeps falling back.
+    expect(connectorForTarget("notion")?.name).toBe("zapier");
+  });
+
+  it("does not fall back when Zapier itself is the unconfigured connector", () => {
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(connectorForTarget("gmail")).toBeNull();
+    expect(connectorForTarget("telegram")).toBeNull();
+  });
+
+  it("reports nothing deliverable when no connector is configured", () => {
+    expect(deliverableTargets()).toEqual([]);
+  });
+
+  it("makes every target deliverable when only Zapier is configured", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    expect(deliverableTargets()).toEqual(["slack", "notion", "gmail", "telegram"]);
+  });
+
+  it("reports only the configured target when Zapier is absent", () => {
+    process.env.SLACK_MCP_URL = "https://mcp.slack.com/mcp";
+    expect(deliverableTargets()).toEqual(["slack"]);
+  });
+
+  it("never routes signal through an MCP connector (local bridge only)", () => {
+    process.env.ZAPIER_MCP_URL = "https://mcp.zapier.com/abc";
+    process.env.NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+    expect(connectorForTarget("signal")).toBeNull();
+  });
+});
