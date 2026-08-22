@@ -68,6 +68,24 @@ they're tested), and where to go next.
 - **One-click share** — push an insight to Slack / Notion / Gmail / Telegram
   (Gmail + Telegram fan out through Zapier).
 
+### Message archive (Signal + WhatsApp → agent memory)
+- **Local archive** — messages + media stored as JSONL + hash-named files under
+  `data/messages/` (gitignored); idempotent ingest (deduped by platform message
+  id), crash-tolerant log loading.
+- **Signal ingest** — opt-in (`SIGNAL_INGEST=1`) SSE consumer of the local
+  signal-cli daemon; archives incoming *and* your own phone-sent messages
+  (device sync), copies attachments; reconnects with backoff.
+- **WhatsApp ingest** — official Business Cloud API webhook
+  (verification handshake, optional `X-Hub-Signature-256` check, Graph API media
+  download) + a token-protected generic bridge endpoint for personal-account
+  bridges the user runs themselves (ToS caveats documented in
+  `docs/MESSAGES.md`).
+- **Agent memory** — `get_message_context` builds a character-budgeted,
+  optionally PII-scrubbed prompt block (newest-kept trim, like the meeting token
+  guard); exposed via an MCP stdio server (`npm run mcp:messages`:
+  search/context/chats/media-inline) and HTTP (`/api/messages`,
+  `/api/messages/context`, `/api/messages/media/:id`).
+
 ### Setup & ops
 - **Credentials** — `ANTHROPIC_API_KEY`, or OAuth via `ant auth login`
   (`npm run dev:auth`). No raw key required.
@@ -111,6 +129,11 @@ they're tested), and where to go next.
   and leaves ordinary meeting text (years, ids, short numbers) untouched.
 - **`lib/export.test.ts`** — the export markdown compiles all sections and omits
   empty ones.
+- **`lib/messages/*.test.ts`** — archive persistence/dedupe/reload, media
+  content-hash storage and path-traversal rejection, Signal envelope
+  normalization (incoming, group, sent-sync, receipts ignored), WhatsApp webhook
+  normalization (statuses ignored) and bridge validation, and the context
+  builder's budget trim + PII scrub.
 - Signal routing: `connectorForTarget("signal")` is pinned to null — Signal can
   never silently fall through to an MCP/Zapier connector.
 

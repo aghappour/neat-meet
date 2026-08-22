@@ -128,6 +128,26 @@ it over localhost only. Setup (once): install
 id. Caveats: unofficial (can break on Signal updates) and uses one linked-device
 slot.
 
+### Message archive (Signal + WhatsApp → agent memory)
+
+Optionally, neat-meet can **archive your Signal and WhatsApp messages — text and
+media — locally** and serve them back as searchable memory for your agents:
+
+- **Signal** — the same local signal-cli daemon used for sharing can also
+  *receive*: set `SIGNAL_INGEST=1` and incoming messages (plus the ones you send
+  from your phone) are archived, attachments included.
+- **WhatsApp** — via the official Business Cloud API webhook
+  (`/api/messages/whatsapp`), or a token-protected drop-off (`POST
+  /api/messages`) for a personal-account bridge you run yourself.
+- **Agent memory** — an MCP server (`npm run mcp:messages`) exposes
+  `search_messages`, `get_message_context` (a token-bounded prompt block),
+  `list_chats`, and `get_media` (images viewable inline); the same data is
+  available over HTTP at `/api/messages` and `/api/messages/context`.
+
+The archive is plain JSONL + files under `data/messages/` (gitignored) and
+never leaves your machine on its own. Full setup, the personal-WhatsApp ToS
+caveats, and a bridge recipe: [`docs/MESSAGES.md`](docs/MESSAGES.md).
+
 ### Redaction controls
 
 Two per-meeting toggles in the header (reset each meeting):
@@ -159,6 +179,7 @@ insights, shared docs, captured slides, full transcript, and chat — as:
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Unit tests (session store, JSON extraction) |
 | `npm run sidecar` | Run the Whisper sidecar standalone |
+| `npm run mcp:messages` | Serve the message archive to agents over MCP (stdio) |
 
 ## Project layout
 
@@ -169,6 +190,8 @@ insights, shared docs, captured slides, full transcript, and chat — as:
 - `lib/connectors.ts` — MCP connector registry (enabled-if-configured)
 - `lib/claude.ts` — Anthropic client + shared helpers
 - `app/api/{summary,insights,share}/` — Claude-backed endpoints
+- `lib/messages/` + `app/api/messages/` — local Signal/WhatsApp message archive + memory API
+- `scripts/messages-mcp.ts` — MCP server exposing the archive to agents
 - `components/` + `app/page.tsx` — capture + transcript / summary / insight UI
 - `extension/` — Chrome extension that imports Google Meet speaker-attributed captions
 

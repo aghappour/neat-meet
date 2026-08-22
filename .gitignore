@@ -19,6 +19,9 @@ whisper-sidecar/.venv/
 __pycache__/
 *.pyc
 
+# message archive (personal data — never commit)
+/data/
+
 # env & secrets
 .env
 .env.local
